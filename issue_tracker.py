@@ -15,11 +15,20 @@ from pathlib import Path
 from typing import Any
 from urllib import error, parse, request
 
+import issue_defaults_store
+import time_entry_api
+import worklog_ui
+
 
 APP_DIR = Path(__file__).resolve().parent
 WEB_DIR = APP_DIR / "web"
 RUNTIME_DIR = APP_DIR / ".runtime"
 CONFIG_PATH = APP_DIR / "config.local.json"
+WORKLOG_APP_PATH = APP_DIR / "worklog_app.js"
+ISSUE_DEFAULTS_SHARED_PATH = APP_DIR / "issue_defaults.json"
+ISSUE_DEFAULTS_LOCAL_PATH = APP_DIR / "issue_defaults.local.json"
+PRIMARY_API_KEY_ENV = "LAWPJ_API_KEY"
+LEGACY_API_KEY_ENV = "REDMINE_API_KEY"
 
 
 @dataclass(frozen=True)
@@ -48,6 +57,8 @@ def load_config() -> dict[str, Any]:
         "redmine_api_key": "",
         "enabled_browsers": ["chrome", "edge", "firefox"],
         "browser_paths": {},
+        "issue_defaults_shared_path": ISSUE_DEFAULTS_SHARED_PATH,
+        "issue_defaults_local_path": ISSUE_DEFAULTS_LOCAL_PATH,
     }
     if CONFIG_PATH.exists():
         with CONFIG_PATH.open("r", encoding="utf-8") as handle:
@@ -58,8 +69,10 @@ def load_config() -> dict[str, Any]:
 
     if os.getenv("REDMINE_BASE_URL"):
         config["redmine_base_url"] = os.environ["REDMINE_BASE_URL"].strip()
-    if os.getenv("REDMINE_API_KEY"):
-        config["redmine_api_key"] = os.environ["REDMINE_API_KEY"].strip()
+    if os.getenv(PRIMARY_API_KEY_ENV):
+        config["redmine_api_key"] = os.environ[PRIMARY_API_KEY_ENV].strip()
+    elif os.getenv(LEGACY_API_KEY_ENV):
+        config["redmine_api_key"] = os.environ[LEGACY_API_KEY_ENV].strip()
 
     browser_paths = config.get("browser_paths") or {}
     if not isinstance(browser_paths, dict):
@@ -68,6 +81,8 @@ def load_config() -> dict[str, Any]:
     config["browser_paths"] = browser_paths
     config["redmine_base_url"] = str(config["redmine_base_url"]).rstrip("/")
     config["redmine_api_key"] = str(config.get("redmine_api_key") or "").strip()
+    config["issue_defaults_shared_path"] = Path(str(config.get("issue_defaults_shared_path") or ISSUE_DEFAULTS_SHARED_PATH))
+    config["issue_defaults_local_path"] = Path(str(config.get("issue_defaults_local_path") or ISSUE_DEFAULTS_LOCAL_PATH))
     enabled = config.get("enabled_browsers") or ["chrome", "edge", "firefox"]
     config["enabled_browsers"] = [str(item).lower() for item in enabled]
     return config
@@ -416,7 +431,7 @@ def build_curl_examples(
         separators=(",", ":"),
     )
     safe_payload = powershell_single_quote(payload)
-    api_header = 'X-Redmine-API-Key: $env:REDMINE_API_KEY'
+    api_header = f'X-Redmine-API-Key: $env:{PRIMARY_API_KEY_ENV}'
     return {
         "get_issue": (
             f'curl.exe -H "{api_header}" '
@@ -436,13 +451,115 @@ def build_curl_examples(
     }
 
 
-def write_json_response(handler: SimpleHTTPRequestHandler, payload: dict[str, Any], status: int = 200) -> None:
+def write_json_response(handler: SimpleHTTPRequestHandler, payload: Any, status: int = 200) -> None:
     body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
+
+
+def write_text_response(
+    handler: SimpleHTTPRequestHandler,
+    body: str,
+    content_type: str = "text/plain; charset=utf-8",
+    status: int = 200,
+) -> None:
+    payload = body.encode("utf-8")
+    handler.send_response(status)
+    handler.send_header("Content-Type", content_type)
+    handler.send_header("Content-Length", str(len(payload)))
+    handler.end_headers()
+    handler.wfile.write(payload)
+
+
+def read_json_request(handler: SimpleHTTPRequestHandler) -> Any:
+    try:
+        content_length = int(handler.headers.get("Content-Length", "0"))
+    except ValueError as exc:
+        raise ValueError("Content-Length 無效。") from exc
+    if content_length <= 0:
+        raise ValueError("Request body 不可為空。")
+    raw_body = handler.rfile.read(content_length)
+    try:
+        return json.loads(raw_body.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError("Request body 必須是合法 JSON。") from exc
+
+
+def issue_defaults_paths(config: dict[str, Any]) -> tuple[Path, Path]:
+    shared_path = Path(str(config.get("issue_defaults_shared_path") or ISSUE_DEFAULTS_SHARED_PATH))
+    local_path = Path(str(config.get("issue_defaults_local_path") or ISSUE_DEFAULTS_LOCAL_PATH))
+    return shared_path, local_path
+
+
+def issue_query_day_label(query: dict[str, list[str]]) -> str:
+    date_value = str(query.get("date", [""])[0] or "").strip()
+    if date_value:
+        return date_value
+    return query.get("day", ["today"])[0]
+
+
+def parse_issue_ids_query(raw_value: str) -> list[int]:
+    issue_ids: list[int] = []
+    seen: set[int] = set()
+    for part in raw_value.split(","):
+        value = part.strip()
+        if not value:
+            continue
+        try:
+            issue_id = int(value)
+        except ValueError as exc:
+            raise ValueError("issue_ids 必須是逗號分隔的正整數。") from exc
+        if issue_id <= 0:
+            raise ValueError("issue_ids 必須是逗號分隔的正整數。")
+        if issue_id not in seen:
+            seen.add(issue_id)
+            issue_ids.append(issue_id)
+    return issue_ids
+
+
+def build_issue_defaults_payload(issue_ids: list[int], config: dict[str, Any]) -> dict[str, Any]:
+    shared_path, local_path = issue_defaults_paths(config)
+    return {
+        "defaults": issue_defaults_store.merged_defaults_for_issues(issue_ids, shared_path, local_path),
+        "shared_path": str(shared_path),
+        "local_path": str(local_path),
+        "warnings": [],
+    }
+
+
+def update_issue_default(issue_id: int, body: Any, config: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(body, dict):
+        raise ValueError("Request body 最外層必須是 object。")
+    shared_path, local_path = issue_defaults_paths(config)
+    issue_defaults_store.update_local_default(local_path, issue_id, body)
+    merged = issue_defaults_store.merged_defaults_for_issues([issue_id], shared_path, local_path)
+    return {
+        "issue_id": issue_id,
+        "default": merged[str(issue_id)],
+        "local_path": str(local_path),
+    }
+
+
+def delete_issue_default(issue_id: int, config: dict[str, Any]) -> dict[str, Any]:
+    shared_path, local_path = issue_defaults_paths(config)
+    removed = issue_defaults_store.delete_local_default(local_path, issue_id)
+    merged = issue_defaults_store.merged_defaults_for_issues([issue_id], shared_path, local_path)
+    return {
+        "issue_id": issue_id,
+        "removed": removed,
+        "default": merged[str(issue_id)],
+        "local_path": str(local_path),
+    }
+
+
+def parse_issue_default_path(path: str) -> int | None:
+    match = re.fullmatch(r"/api/issue-defaults/(\d+)", path)
+    if match is None:
+        return None
+    return int(match.group(1))
 
 
 class TrackerRequestHandler(SimpleHTTPRequestHandler):
@@ -452,53 +569,137 @@ class TrackerRequestHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = parse.urlparse(self.path)
-        if parsed.path == "/api/issues":
-            query = parse.parse_qs(parsed.query)
-            day = query.get("day", ["today"])[0]
-            use_api = query.get("include_api", ["1"])[0] != "0"
-            try:
+        try:
+            if parsed.path in {"/", "/index.html"}:
+                write_text_response(self, worklog_ui.INDEX_HTML, "text/html; charset=utf-8")
+                return
+
+            if parsed.path == "/worklog-app.js":
+                write_text_response(self, WORKLOG_APP_PATH.read_text(encoding="utf-8"), "text/javascript; charset=utf-8")
+                return
+
+            if parsed.path == "/api/issues":
+                query = parse.parse_qs(parsed.query)
+                day = issue_query_day_label(query)
+                use_api = query.get("include_api", ["1"])[0] != "0"
                 payload = collect_issues(day, self.config, use_redmine_api=use_api)
                 write_json_response(self, payload)
-            except ValueError as exc:
-                write_json_response(self, {"error": str(exc)}, status=400)
-            return
-
-        if parsed.path == "/api/config":
-            write_json_response(
-                self,
-                {
-                    "redmine_base_url": self.config["redmine_base_url"],
-                    "redmine_api_enabled": bool(self.config["redmine_api_key"]),
-                    "available_sources": [
-                        {"name": source.name, "path": str(source.path)}
-                        for source in discover_browser_sources(self.config)
-                    ],
-                },
-            )
-            return
-
-        if parsed.path == "/api/curl-examples":
-            query = parse.parse_qs(parsed.query)
-            raw_issue_id = query.get("issue_id", [None])[0]
-            if raw_issue_id is None:
-                write_json_response(self, {"error": "issue_id is required"}, status=400)
                 return
-            day = query.get("spent_on", [datetime.now(local_timezone()).date().isoformat()])[0]
-            hours = query.get("hours", ["1.0"])[0]
-            activity_id = query.get("activity_id", ["9"])[0]
-            comments = query.get("comments", ["補登工時"])[0]
-            payload = build_curl_examples(
-                issue_id=int(raw_issue_id),
-                spent_on=day,
-                base_url=self.config["redmine_base_url"],
-                hours=hours,
-                activity_id=activity_id,
-                comments=comments,
-            )
-            write_json_response(self, payload)
+
+            if parsed.path == "/api/config":
+                write_json_response(
+                    self,
+                    {
+                        "redmine_base_url": self.config["redmine_base_url"],
+                        "redmine_api_enabled": bool(self.config["redmine_api_key"]),
+                        "time_entry_write_enabled": bool(self.config["redmine_api_key"]),
+                        "preview_ttl_seconds": time_entry_api.PREVIEW_TTL_SECONDS,
+                        "available_sources": [
+                            {"name": source.name, "path": str(source.path)}
+                            for source in discover_browser_sources(self.config)
+                        ],
+                    },
+                )
+                return
+
+            if parsed.path == "/api/time-entry-activities":
+                payload = time_entry_api.fetch_time_entry_activities(self.config)
+                write_json_response(self, payload)
+                return
+
+            if parsed.path == "/api/issue-defaults":
+                query = parse.parse_qs(parsed.query)
+                issue_ids = parse_issue_ids_query(query.get("issue_ids", [""])[0])
+                payload = build_issue_defaults_payload(issue_ids, self.config)
+                write_json_response(self, payload)
+                return
+
+            if parsed.path == "/api/curl-examples":
+                query = parse.parse_qs(parsed.query)
+                raw_issue_id = query.get("issue_id", [None])[0]
+                if raw_issue_id is None:
+                    write_json_response(self, {"error": "issue_id is required"}, status=400)
+                    return
+                day = query.get("spent_on", [datetime.now(local_timezone()).date().isoformat()])[0]
+                hours = query.get("hours", ["1.0"])[0]
+                activity_id = query.get("activity_id", ["9"])[0]
+                comments = query.get("comments", ["補登工時"])[0]
+                payload = build_curl_examples(
+                    issue_id=int(raw_issue_id),
+                    spent_on=day,
+                    base_url=self.config["redmine_base_url"],
+                    hours=hours,
+                    activity_id=activity_id,
+                    comments=comments,
+                )
+                write_json_response(self, payload)
+                return
+        except time_entry_api.ApiError as exc:
+            write_json_response(self, {"error": exc.message, **(exc.details or {})}, status=exc.status)
+            return
+        except ValueError as exc:
+            write_json_response(self, {"error": str(exc)}, status=400)
             return
 
         super().do_GET()
+
+    def do_POST(self) -> None:  # noqa: N802
+        parsed = parse.urlparse(self.path)
+        try:
+            body = read_json_request(self)
+            if not isinstance(body, dict):
+                raise ValueError("Request body 最外層必須是 object。")
+
+            if parsed.path == "/api/time-entries/preview":
+                payload = time_entry_api.preview_time_entries(body.get("spent_on"), body.get("entries"), self.config)
+                write_json_response(self, payload)
+                return
+
+            if parsed.path == "/api/time-entries/commit":
+                preview_token = str(body.get("preview_token") or "").strip()
+                if not preview_token:
+                    raise ValueError("preview_token is required")
+                payload = time_entry_api.commit_time_entries(
+                    preview_token,
+                    body.get("spent_on"),
+                    body.get("entries"),
+                    self.config,
+                )
+                write_json_response(self, payload)
+                return
+        except time_entry_api.ApiError as exc:
+            write_json_response(self, {"error": exc.message, **(exc.details or {})}, status=exc.status)
+            return
+        except ValueError as exc:
+            write_json_response(self, {"error": str(exc)}, status=400)
+            return
+
+        write_json_response(self, {"error": "Not found"}, status=404)
+
+    def do_PUT(self) -> None:  # noqa: N802
+        parsed = parse.urlparse(self.path)
+        issue_id = parse_issue_default_path(parsed.path)
+        if issue_id is None:
+            write_json_response(self, {"error": "Not found"}, status=404)
+            return
+        try:
+            body = read_json_request(self)
+            payload = update_issue_default(issue_id, body, self.config)
+            write_json_response(self, payload)
+        except ValueError as exc:
+            write_json_response(self, {"error": str(exc)}, status=400)
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        parsed = parse.urlparse(self.path)
+        issue_id = parse_issue_default_path(parsed.path)
+        if issue_id is None:
+            write_json_response(self, {"error": "Not found"}, status=404)
+            return
+        try:
+            payload = delete_issue_default(issue_id, self.config)
+            write_json_response(self, payload)
+        except ValueError as exc:
+            write_json_response(self, {"error": str(exc)}, status=400)
 
     def log_message(self, format: str, *args: Any) -> None:
         message = "%s - - [%s] %s" % (self.address_string(), self.log_date_time_string(), format % args)
