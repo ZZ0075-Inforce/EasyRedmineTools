@@ -50,6 +50,40 @@ def redmine_headers(config: dict[str, Any]) -> dict[str, str]:
     return headers
 
 
+def extract_http_error_detail(exc: error.HTTPError) -> str:
+    try:
+        raw = exc.read().decode("utf-8", errors="replace")
+    except Exception:
+        raw = ""
+    if not raw.strip():
+        return f"HTTP {exc.code}"
+    try:
+        body = json.loads(raw)
+    except ValueError:
+        snippet = raw.strip().replace("\n", " ")[:200]
+        return f"HTTP {exc.code}: {snippet}"
+    messages: list[str] = []
+    errs = body.get("errors") if isinstance(body, dict) else None
+    if isinstance(errs, list):
+        for item in errs:
+            if isinstance(item, str):
+                messages.append(item)
+            elif isinstance(item, list):
+                messages.append(" ".join(str(x) for x in item))
+            else:
+                messages.append(str(item))
+    elif isinstance(errs, dict):
+        for field, msgs in errs.items():
+            if isinstance(msgs, list):
+                messages.append(f"{field}: " + "; ".join(str(m) for m in msgs))
+            else:
+                messages.append(f"{field}: {msgs}")
+    if not messages:
+        snippet = raw.strip().replace("\n", " ")[:200]
+        return f"HTTP {exc.code}: {snippet}"
+    return f"HTTP {exc.code}: " + "; ".join(messages)
+
+
 def redmine_request_json(
     url: str,
     config: dict[str, Any],
@@ -170,6 +204,73 @@ def fetch_redmine_details(issue_ids: list[int], config: dict[str, Any]) -> tuple
             "estimated_hours": issue.get("estimated_hours"),
         }
     return details, warnings
+
+
+def normalize_issue_summary(raw_issue: dict[str, Any]) -> dict[str, Any]:
+    try:
+        issue_id = int(raw_issue.get("id"))
+    except (TypeError, ValueError):
+        return {}
+    project = raw_issue.get("project") or {}
+    status = raw_issue.get("status") or {}
+    tracker = raw_issue.get("tracker") or {}
+    priority = raw_issue.get("priority") or {}
+    assigned_to = raw_issue.get("assigned_to") or {}
+    return {
+        "issue_id": issue_id,
+        "subject": str(raw_issue.get("subject") or "").strip(),
+        "status": str(status.get("name") or "").strip(),
+        "status_id": status.get("id"),
+        "is_closed": bool(status.get("is_closed", False)),
+        "project": str(project.get("name") or "").strip(),
+        "project_id": project.get("id"),
+        "tracker": str(tracker.get("name") or "").strip(),
+        "priority": str(priority.get("name") or "").strip(),
+        "assigned_to": str(assigned_to.get("name") or "").strip(),
+        "assigned_to_id": assigned_to.get("id"),
+        "updated_on": raw_issue.get("updated_on"),
+        "done_ratio": raw_issue.get("done_ratio"),
+        "spent_hours": raw_issue.get("spent_hours"),
+        "estimated_hours": raw_issue.get("estimated_hours"),
+    }
+
+
+def fetch_issue_list(
+    params: dict[str, Any],
+    config: dict[str, Any],
+    max_results: int = 100,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    warnings: list[str] = []
+    if not config.get("redmine_api_key"):
+        return [], ["未設定 API key，無法查詢 issue。"]
+
+    base_url = config["redmine_base_url"].rstrip("/")
+    query = {k: v for k, v in params.items() if v not in (None, "")}
+    query.setdefault("limit", str(min(max_results, 100)))
+    url = f"{base_url}/issues.json?{parse.urlencode(query)}"
+
+    try:
+        payload = redmine_request_json(url, config, method="GET")
+    except error.HTTPError as exc:
+        return [], [f"查詢 issue 失敗: HTTP {exc.code}"]
+    except error.URLError as exc:
+        return [], [f"查詢 issue 失敗: {exc.reason}"]
+    except Exception as exc:
+        return [], [f"查詢 issue 發生例外: {exc}"]
+
+    raw_issues = payload.get("issues")
+    if not isinstance(raw_issues, list):
+        return [], warnings
+
+    results: list[dict[str, Any]] = []
+    for item in raw_issues:
+        if not isinstance(item, dict):
+            continue
+        summary = normalize_issue_summary(item)
+        if summary:
+            summary["issue_url"] = f"{base_url}/issues/{summary['issue_id']}"
+            results.append(summary)
+    return results, warnings
 
 
 def normalize_existing_time_entry(entry: dict[str, Any]) -> dict[str, Any]:
@@ -391,6 +492,50 @@ def preview_time_entries(spent_on: Any, raw_entries: Any, config: dict[str, Any]
     }
 
 
+def update_issue_dates(issue_id: int, start_date: str, due_date: str, config: dict[str, Any]) -> dict[str, Any]:
+    ensure_api_key(config, "更新 issue 起迄日期")
+    url = f"{config['redmine_base_url'].rstrip('/')}/issues/{issue_id}.json"
+    payload = {"issue": {"start_date": start_date, "due_date": due_date}}
+    return redmine_request_json(url, config, method="PUT", payload=payload)
+
+
+def apply_schedule_dates(raw_entries: Any, config: dict[str, Any]) -> dict[str, Any]:
+    ensure_api_key(config, "更新 issue 起迄日期")
+    if not isinstance(raw_entries, list) or not raw_entries:
+        raise ApiError(400, "entries 必須是非空陣列。")
+    results: list[dict[str, Any]] = []
+    for raw in raw_entries:
+        if not isinstance(raw, dict):
+            results.append({"error": "entry 必須是 object。"})
+            continue
+        try:
+            issue_id = int(raw.get("issue_id"))
+            if issue_id <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            results.append({"issue_id": raw.get("issue_id"), "error": "issue_id 不正確。"})
+            continue
+        try:
+            start = normalize_spent_on(raw.get("start_date"))
+            due = normalize_spent_on(raw.get("due_date"))
+        except ApiError as exc:
+            results.append({"issue_id": issue_id, "error": exc.message})
+            continue
+        if start > due:
+            results.append({"issue_id": issue_id, "error": "起始日不得晚於結束日。"})
+            continue
+        try:
+            update_issue_dates(issue_id, start, due, config)
+            results.append({"issue_id": issue_id, "start_date": start, "due_date": due, "ok": True})
+        except error.HTTPError as exc:
+            results.append({"issue_id": issue_id, "error": extract_http_error_detail(exc)})
+        except error.URLError as exc:
+            results.append({"issue_id": issue_id, "error": str(exc.reason)})
+        except Exception as exc:
+            results.append({"issue_id": issue_id, "error": str(exc)})
+    return {"results": results}
+
+
 def create_time_entry(entry: dict[str, Any], spent_on: str, config: dict[str, Any]) -> dict[str, Any]:
     ensure_api_key(config, "提交工時")
     payload = build_time_entry_payload(entry, spent_on)
@@ -442,7 +587,7 @@ def commit_time_entries(preview_token: str, spent_on: Any, raw_entries: Any, con
         try:
             payload = create_time_entry(preview_entry, normalized_spent_on, config)
         except error.HTTPError as exc:
-            result["error"] = f"HTTP {exc.code}"
+            result["error"] = extract_http_error_detail(exc)
         except error.URLError as exc:
             result["error"] = str(exc.reason)
         except Exception as exc:

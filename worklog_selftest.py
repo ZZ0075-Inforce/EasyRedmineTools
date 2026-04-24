@@ -12,6 +12,8 @@ from urllib import error as urlerror
 from urllib import request as urlrequest
 
 import issue_tracker
+import phrases_store
+import saved_queries_store
 import time_entry_api
 
 warnings.filterwarnings("ignore", category=ResourceWarning)
@@ -24,14 +26,13 @@ class WorklogSelfTests(unittest.TestCase):
         runtime_dir.mkdir(parents=True, exist_ok=True)
         self.tempdir = runtime_dir / f"case_{os.getpid()}_{uuid4().hex}"
         self.tempdir.mkdir(parents=True, exist_ok=False)
-        self.shared_path = self.tempdir / "issue_defaults.json"
-        self.local_path = self.tempdir / "issue_defaults.local.json"
-        self.shared_path.write_text('{"issues":{}}', encoding="utf-8")
+        self.phrases_path = self.tempdir / "phrases.local.json"
+        self.saved_queries_path = self.tempdir / "saved_queries.local.json"
         self.config = {
             "redmine_base_url": "https://example.test",
             "redmine_api_key": "demo-key",
-            "issue_defaults_shared_path": self.shared_path,
-            "issue_defaults_local_path": self.local_path,
+            "phrases_path": self.phrases_path,
+            "saved_queries_path": self.saved_queries_path,
         }
 
     def tearDown(self) -> None:
@@ -148,20 +149,8 @@ class WorklogSelfTests(unittest.TestCase):
 
     def test_commit_posts_only_selected_entries(self) -> None:
         entries = [
-            {
-                "issue_id": 101,
-                "hours": "1.5",
-                "activity_id": "9",
-                "comments": "A",
-                "selected": True,
-            },
-            {
-                "issue_id": 102,
-                "hours": "0.5",
-                "activity_id": "9",
-                "comments": "B",
-                "selected": True,
-            },
+            {"issue_id": 101, "hours": "1.5", "activity_id": "9", "comments": "A", "selected": True},
+            {"issue_id": 102, "hours": "0.5", "activity_id": "9", "comments": "B", "selected": True},
         ]
         calls: list[tuple[str, str]] = []
 
@@ -197,71 +186,69 @@ class WorklogSelfTests(unittest.TestCase):
         self.assertEqual(result["results"][0]["created_time_entry_id"], 9101)
         self.assertTrue(result["results"][1]["skipped"])
 
-    def test_http_preview_endpoint_uses_new_request_shape(self) -> None:
+    def test_apply_schedule_dates_puts_per_issue(self) -> None:
+        put_calls: list[tuple[str, dict[str, object]]] = []
+
         def fake_request(url: str, config: dict[str, object], method: str = "GET", payload=None):
-            if url.endswith("/issues/101.json"):
-                return {"issue": {"subject": "Issue 101"}}
-            if "time_entries.json?" in url:
-                return {"time_entries": []}
+            if method == "PUT" and "/issues/" in url:
+                put_calls.append((url, payload))
+                return {}
             raise AssertionError((method, url))
 
         original = time_entry_api.redmine_request_json
         time_entry_api.redmine_request_json = fake_request
-        server, thread, port = self.start_server()
         try:
-            request_body = json.dumps({"spent_on": "2026-03-20", "entries": self.sample_entries()}).encode("utf-8")
-            req = urlrequest.Request(
-                f"http://127.0.0.1:{port}/api/time-entries/preview",
-                data=request_body,
-                headers={"Content-Type": "application/json"},
-                method="POST",
+            result = time_entry_api.apply_schedule_dates(
+                [
+                    {"issue_id": 101, "start_date": "2026-04-21", "due_date": "2026-04-22"},
+                    {"issue_id": 202, "start_date": "2026-04-23", "due_date": "2026-04-25"},
+                ],
+                self.config,
             )
-            with urlrequest.urlopen(req, timeout=5) as response:
-                payload = json.loads(response.read().decode("utf-8"))
         finally:
             time_entry_api.redmine_request_json = original
-            server.shutdown()
-            server.server_close()
-            thread.join(timeout=1)
 
-        self.assertTrue(payload["preview_token"])
-        self.assertEqual(payload["spent_on"], "2026-03-20")
-        self.assertEqual(payload["entries"][0]["issue_subject"], "Issue 101")
+        self.assertEqual(len(put_calls), 2)
+        self.assertIn("/issues/101.json", put_calls[0][0])
+        self.assertEqual(put_calls[0][1]["issue"]["start_date"], "2026-04-21")
+        self.assertEqual(put_calls[0][1]["issue"]["due_date"], "2026-04-22")
+        self.assertTrue(all(r.get("ok") for r in result["results"]))
 
-    def test_http_issues_endpoint_prefers_date_query(self) -> None:
-        calls: list[str] = []
+    def test_apply_schedule_dates_rejects_invalid_range(self) -> None:
+        result = time_entry_api.apply_schedule_dates(
+            [{"issue_id": 101, "start_date": "2026-04-25", "due_date": "2026-04-20"}],
+            self.config,
+        )
+        self.assertEqual(result["results"][0]["error"], "起始日不得晚於結束日。")
 
-        def fake_collect(day_label: str, config: dict[str, object], use_redmine_api: bool = True):
-            calls.append(day_label)
-            return {
-                "day": day_label,
-                "target_date": day_label,
-                "range_start": f"{day_label}T00:00:00+08:00",
-                "range_end": f"{day_label}T23:59:59+08:00",
-                "issue_count": 0,
-                "issues": [],
-                "diagnostics": {"redmine_api_enabled": use_redmine_api, "checked_sources": [], "warnings": []},
-            }
+    def test_issues_endpoint_delegates_to_mine_source(self) -> None:
+        captured_params: list[dict[str, object]] = []
 
-        original = issue_tracker.collect_issues
-        issue_tracker.collect_issues = fake_collect
+        def fake_fetch(params, config, max_results=100):
+            captured_params.append(dict(params))
+            return [{"issue_id": 101, "subject": "Sample", "issue_url": "https://example.test/issues/101"}], []
+
+        original = time_entry_api.fetch_issue_list
+        time_entry_api.fetch_issue_list = fake_fetch
         server, thread, port = self.start_server()
         try:
             with urlrequest.urlopen(
-                f"http://127.0.0.1:{port}/api/issues?day=today&date=2026-03-20",
+                f"http://127.0.0.1:{port}/api/issues?source=mine",
                 timeout=5,
             ) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         finally:
-            issue_tracker.collect_issues = original
+            time_entry_api.fetch_issue_list = original
             server.shutdown()
             server.server_close()
             thread.join(timeout=1)
 
-        self.assertEqual(calls, ["2026-03-20"])
-        self.assertEqual(payload["target_date"], "2026-03-20")
+        self.assertEqual(payload["source"], "mine")
+        self.assertEqual(payload["issue_count"], 1)
+        self.assertEqual(captured_params[0]["assigned_to_id"], "me")
+        self.assertEqual(captured_params[0]["status_id"], "open")
 
-    def test_ui_homepage_contains_date_navigation_and_loading_mask(self) -> None:
+    def test_ui_homepage_contains_source_tabs_and_drawers(self) -> None:
         server, thread, port = self.start_server()
         try:
             with urlrequest.urlopen(f"http://127.0.0.1:{port}/", timeout=5) as response:
@@ -271,58 +258,147 @@ class WorklogSelfTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=1)
 
-        self.assertIn('id="source-date-input"', html)
-        self.assertIn('id="source-prev-button"', html)
-        self.assertIn('id="source-next-button"', html)
+        self.assertIn('id="source-tabs"', html)
+        self.assertIn('id="settings-modal"', html)
+        self.assertIn('id="phrases-list"', html)
+        self.assertIn('id="saved-queries-list"', html)
+        self.assertIn('id="filter-date"', html)
+        self.assertIn('id="filter-search"', html)
         self.assertIn('id="loading-mask"', html)
-        self.assertIn('id="loading-message"', html)
+        self.assertNotIn('id="project-picker"', html)
 
-    def test_issue_defaults_endpoints_only_touch_local_file(self) -> None:
-        self.shared_path.write_text(
-            json.dumps(
-                {
-                    "issues": {
-                        "101": {"hours": "1.0", "activity_id": 9, "comments": "shared"},
-                    }
-                },
-                ensure_ascii=False,
-            ),
-            encoding="utf-8",
-        )
-
+    def test_phrase_endpoints_crud(self) -> None:
         server, thread, port = self.start_server()
         try:
-            with urlrequest.urlopen(f"http://127.0.0.1:{port}/api/issue-defaults?issue_ids=101", timeout=5) as response:
-                initial_payload = json.loads(response.read().decode("utf-8"))
+            create_body = json.dumps(
+                {
+                    "label": "daily",
+                    "hours": "1.0",
+                    "activity_id": 9,
+                    "comments": "daily maintenance",
+                }
+            ).encode("utf-8")
+            req = urlrequest.Request(
+                f"http://127.0.0.1:{port}/api/phrases",
+                data=create_body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urlrequest.urlopen(req, timeout=5) as response:
+                created = json.loads(response.read().decode("utf-8"))
+            phrase_id = created["phrase"]["id"]
 
-            put_body = json.dumps({"hours": "2.5", "activity_id": 11, "comments": "local"}).encode("utf-8")
-            put_request = urlrequest.Request(
-                f"http://127.0.0.1:{port}/api/issue-defaults/101",
-                data=put_body,
+            with urlrequest.urlopen(f"http://127.0.0.1:{port}/api/phrases", timeout=5) as response:
+                listed = json.loads(response.read().decode("utf-8"))
+
+            update_body = json.dumps(
+                {"label": "updated", "hours": "", "activity_id": "", "comments": "only comment"}
+            ).encode("utf-8")
+            req = urlrequest.Request(
+                f"http://127.0.0.1:{port}/api/phrases/{phrase_id}",
+                data=update_body,
                 headers={"Content-Type": "application/json"},
                 method="PUT",
             )
-            with urlrequest.urlopen(put_request, timeout=5) as response:
-                put_payload = json.loads(response.read().decode("utf-8"))
+            with urlrequest.urlopen(req, timeout=5) as response:
+                updated = json.loads(response.read().decode("utf-8"))
 
-            delete_request = urlrequest.Request(
-                f"http://127.0.0.1:{port}/api/issue-defaults/101",
+            req = urlrequest.Request(
+                f"http://127.0.0.1:{port}/api/phrases/{phrase_id}",
                 method="DELETE",
             )
-            with urlrequest.urlopen(delete_request, timeout=5) as response:
-                delete_payload = json.loads(response.read().decode("utf-8"))
+            with urlrequest.urlopen(req, timeout=5) as response:
+                deleted = json.loads(response.read().decode("utf-8"))
         finally:
             server.shutdown()
             server.server_close()
             thread.join(timeout=1)
 
-        self.assertEqual(initial_payload["defaults"]["101"]["source"], "shared")
-        self.assertEqual(put_payload["default"]["source"], "local override")
-        self.assertEqual(delete_payload["default"]["source"], "shared")
-        shared_document = json.loads(self.shared_path.read_text(encoding="utf-8"))
-        self.assertEqual(shared_document["issues"]["101"]["comments"], "shared")
-        local_document = json.loads(self.local_path.read_text(encoding="utf-8"))
-        self.assertEqual(local_document["issues"], {})
+        self.assertEqual(created["phrase"]["hours"], "1")
+        self.assertEqual(created["phrase"]["activity_id"], 9)
+        self.assertEqual(created["phrase"]["comments"], "daily maintenance")
+        self.assertEqual(len(listed["phrases"]), 1)
+        self.assertEqual(updated["phrase"]["comments"], "only comment")
+        self.assertEqual(updated["phrase"]["hours"], "")
+        self.assertEqual(updated["phrase"]["activity_id"], "")
+        self.assertTrue(deleted["removed"])
+        self.assertEqual(phrases_store.list_phrases(self.phrases_path), [])
+
+    def test_phrase_rejects_all_empty_payload(self) -> None:
+        server, thread, port = self.start_server()
+        try:
+            body = json.dumps({"label": "空的"}).encode("utf-8")
+            req = urlrequest.Request(
+                f"http://127.0.0.1:{port}/api/phrases",
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with self.assertRaises(urlerror.HTTPError) as context:
+                urlrequest.urlopen(req, timeout=5)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=1)
+        self.assertEqual(context.exception.code, 400)
+
+    def test_saved_queries_endpoints_crud(self) -> None:
+        server, thread, port = self.start_server()
+        try:
+            create_body = json.dumps({"name": "我的任務分組", "query_id": 762}).encode("utf-8")
+            req = urlrequest.Request(
+                f"http://127.0.0.1:{port}/api/saved-queries",
+                data=create_body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urlrequest.urlopen(req, timeout=5) as response:
+                created = json.loads(response.read().decode("utf-8"))
+
+            with urlrequest.urlopen(f"http://127.0.0.1:{port}/api/saved-queries", timeout=5) as response:
+                listed = json.loads(response.read().decode("utf-8"))
+
+            req = urlrequest.Request(
+                f"http://127.0.0.1:{port}/api/saved-queries/762",
+                method="DELETE",
+            )
+            with urlrequest.urlopen(req, timeout=5) as response:
+                deleted = json.loads(response.read().decode("utf-8"))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=1)
+
+        self.assertEqual(created["query"]["query_id"], 762)
+        self.assertEqual(len(listed["queries"]), 1)
+        self.assertTrue(deleted["removed"])
+        self.assertEqual(saved_queries_store.list_queries(self.saved_queries_path), [])
+
+    def test_issues_endpoint_query_source_passes_query_id(self) -> None:
+        captured_params: list[dict[str, object]] = []
+
+        def fake_fetch(params, config, max_results=100):
+            captured_params.append(dict(params))
+            return [], []
+
+        original = time_entry_api.fetch_issue_list
+        time_entry_api.fetch_issue_list = fake_fetch
+        server, thread, port = self.start_server()
+        try:
+            with urlrequest.urlopen(
+                f"http://127.0.0.1:{port}/api/issues?source=query&query_id=762",
+                timeout=5,
+            ) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        finally:
+            time_entry_api.fetch_issue_list = original
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=1)
+
+        self.assertEqual(payload["source"], "query")
+        self.assertEqual(payload["query_id"], 762)
+        self.assertEqual(captured_params[0]["query_id"], 762)
 
 
 if __name__ == "__main__":

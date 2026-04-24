@@ -1,5 +1,4 @@
 {
   "redmine_base_url": "https://lawpj.lawbroker.com.tw",
-  "redmine_api_key": "paste-your-personal-api-key-here",
-  "enabled_browsers": ["chrome", "edge", "firefox"]
+  "redmine_api_key": "paste-your-personal-api-key-here"
 }

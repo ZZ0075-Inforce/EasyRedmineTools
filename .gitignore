@@ -1,4 +1,5 @@
 __pycache__/
 .runtime/
 config.local.json
-issue_defaults.local.json
+phrases.local.json
+saved_queries.local.json
