@@ -4,56 +4,64 @@ INDEX_HTML = """<!doctype html>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Worklog · Easy Redmine</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600&family=Noto+Serif+TC:wght@600;700&display=swap" rel="stylesheet">
     <style>
+      /* DESIGN.md: 暖紙色 × 深灰主文字 × 品牌紅 accent */
       :root {
-        --bg: #f8fafc;
-        --panel: #ffffff;
-        --panel-border: #e2e8f0;
-        --ink: #0f172a;
-        --muted: #64748b;
-        --accent: #0f766e;
-        --accent-soft: rgba(15, 118, 110, 0.08);
-        --accent-hover: rgba(15, 118, 110, 0.13);
-        --selected-bg: rgba(15, 118, 110, 0.06);
-        --selected-border: rgba(15, 118, 110, 0.28);
-        --danger: #dc2626;
-        --danger-soft: rgba(220, 38, 38, 0.08);
-        --warn-bg: rgba(217, 119, 6, 0.08);
-        --warn-bg-strong: rgba(217, 119, 6, 0.14);
-        --warn-border: rgba(217, 119, 6, 0.22);
-        --warn-text: #b45309;
-        --shadow: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
-        --shadow-md: 0 4px 12px rgba(0,0,0,.08);
-        --input-bg: #ffffff;
-        --hover-bg: rgba(0, 0, 0, 0.04);
-        --card-bg: #ffffff;
-        --subtle: rgba(0, 0, 0, 0.04);
+        --bg: #f9f5f1;
+        --panel: #fdfaf7;
+        --panel-border: #e8e2da;
+        --divider: #efe8e1;
+        --ink: #2c2c2c;
+        --muted: #5f5a54;
+        --accent: #d13a3a;
+        --accent-hover: #b92f2f;
+        --accent-soft: rgba(209, 58, 58, 0.08);
+        --selected-bg: rgba(209, 58, 58, 0.06);
+        --selected-border: rgba(209, 58, 58, 0.28);
+        --success: #5c7a5a;
+        --danger: #b93838;
+        --danger-soft: rgba(185, 56, 56, 0.08);
+        --warn-bg: rgba(183, 121, 31, 0.08);
+        --warn-bg-strong: rgba(183, 121, 31, 0.14);
+        --warn-border: rgba(183, 121, 31, 0.24);
+        --warn-text: #b7791f;
+        --shadow: 0 1px 2px rgba(44,44,44,.04);
+        --shadow-md: 0 2px 8px rgba(44,44,44,.06);
+        --input-bg: #fdfaf7;
+        --hover-bg: rgba(44, 44, 44, 0.04);
+        --card-bg: #fdfaf7;
+        --subtle: #f3ede7;
       }
 
       [data-theme="dark"] {
         color-scheme: dark;
-        --bg: #0f172a;
-        --panel: #1e293b;
-        --panel-border: #334155;
-        --ink: #f1f5f9;
-        --muted: #94a3b8;
-        --accent: #2dd4bf;
-        --accent-soft: rgba(45, 212, 191, 0.1);
-        --accent-hover: rgba(45, 212, 191, 0.16);
-        --selected-bg: rgba(45, 212, 191, 0.08);
-        --selected-border: rgba(45, 212, 191, 0.32);
-        --danger: #f87171;
-        --danger-soft: rgba(248, 113, 113, 0.1);
-        --warn-bg: rgba(251, 191, 36, 0.1);
-        --warn-bg-strong: rgba(251, 191, 36, 0.18);
-        --warn-border: rgba(251, 191, 36, 0.28);
-        --warn-text: #fbbf24;
-        --shadow: 0 1px 3px rgba(0,0,0,.3);
-        --shadow-md: 0 4px 12px rgba(0,0,0,.45);
-        --input-bg: #1e293b;
-        --hover-bg: rgba(255, 255, 255, 0.05);
-        --card-bg: #243044;
-        --subtle: rgba(255, 255, 255, 0.05);
+        --bg: #1c1a17;
+        --panel: #252220;
+        --panel-border: #3a3531;
+        --divider: #302c29;
+        --ink: #f2ede7;
+        --muted: #a8a29a;
+        --accent: #e85454;
+        --accent-hover: #d13a3a;
+        --accent-soft: rgba(232, 84, 84, 0.1);
+        --selected-bg: rgba(232, 84, 84, 0.1);
+        --selected-border: rgba(232, 84, 84, 0.35);
+        --success: #86a384;
+        --danger: #e85454;
+        --danger-soft: rgba(232, 84, 84, 0.12);
+        --warn-bg: rgba(218, 165, 32, 0.1);
+        --warn-bg-strong: rgba(218, 165, 32, 0.18);
+        --warn-border: rgba(218, 165, 32, 0.28);
+        --warn-text: #dcb671;
+        --shadow: 0 1px 2px rgba(0,0,0,.3);
+        --shadow-md: 0 2px 8px rgba(0,0,0,.4);
+        --input-bg: #252220;
+        --hover-bg: rgba(242, 237, 231, 0.05);
+        --card-bg: #2a2624;
+        --subtle: #302c29;
       }
 
       * { box-sizing: border-box; }
@@ -63,25 +71,34 @@ INDEX_HTML = """<!doctype html>
         min-height: 100vh;
         background: var(--bg);
         color: var(--ink);
-        font-family: "Segoe UI Variable", "Noto Sans TC", "PingFang TC", sans-serif;
+        font-family: "Noto Sans TC", "Inter", "PingFang TC", "Segoe UI", sans-serif;
         font-size: 15px;
-        line-height: 1.5;
+        line-height: 1.55;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+
+      .serif-heading {
+        font-family: "Noto Serif TC", Georgia, serif;
+        font-weight: 600;
+        letter-spacing: -0.01em;
       }
 
       button, input, select, textarea { font: inherit; }
       a { color: var(--accent); }
+      a:hover { color: var(--accent-hover); }
 
       .shell {
-        max-width: 1380px;
+        max-width: 1280px;
         margin: 0 auto;
-        padding: 20px 16px 44px;
+        padding: 24px 16px 44px;
       }
 
       /* ─── Panels ─────────────────────────────────────────── */
       .panel {
         background: var(--panel);
         border: 1px solid var(--panel-border);
-        border-radius: 12px;
+        border-radius: 10px;
         box-shadow: var(--shadow);
       }
 
@@ -90,11 +107,11 @@ INDEX_HTML = """<!doctype html>
         display: flex;
         align-items: center;
         gap: 4px;
-        padding: 6px;
-        margin-bottom: 12px;
+        padding: 4px;
+        margin-bottom: 16px;
         background: var(--panel);
         border: 1px solid var(--panel-border);
-        border-radius: 12px;
+        border-radius: 10px;
         box-shadow: var(--shadow);
       }
       .top-tab {
@@ -102,13 +119,13 @@ INDEX_HTML = """<!doctype html>
         background: transparent;
         color: var(--muted);
         padding: 8px 18px;
-        border-radius: 8px;
+        border-radius: 6px;
         cursor: pointer;
         font-size: 14px;
         font-weight: 500;
-        transition: background 120ms, color 120ms;
+        transition: background 150ms ease-out, color 150ms ease-out;
       }
-      .top-tab:hover { background: var(--hover-bg); color: var(--ink); }
+      .top-tab:hover { background: var(--subtle); color: var(--ink); }
       .top-tab.active { background: var(--accent); color: #fff; }
       .top-tabs-spacer { flex: 1; }
 
@@ -137,15 +154,15 @@ INDEX_HTML = """<!doctype html>
       .source-tab {
         border: 1px solid var(--panel-border);
         background: transparent;
-        border-radius: 8px;
+        border-radius: 6px;
         padding: 8px 14px;
         cursor: pointer;
         font-size: 14px;
         color: var(--ink);
         white-space: nowrap;
-        transition: background 120ms, border-color 120ms;
+        transition: background 150ms ease-out, border-color 150ms ease-out;
       }
-      .source-tab:hover { background: var(--hover-bg); }
+      .source-tab:hover { background: var(--subtle); }
       .source-tab.active { background: var(--accent); color: white; border-color: var(--accent); }
       .source-tab .remove { margin-left: 6px; opacity: 0.7; cursor: pointer; }
       .source-spacer { flex: 1; }
@@ -164,28 +181,33 @@ INDEX_HTML = """<!doctype html>
         align-items: center;
       }
 
-      /* ─── Buttons ────────────────────────────────────────── */
+      /* ─── Buttons (DESIGN.md: 40px height, radius-sm 6px) ─ */
       .nav-button, .action-button, .ghost-button, .danger-button {
         border: 0;
-        border-radius: 8px;
-        padding: 10px 16px;
+        border-radius: 6px;
+        height: 40px;
+        padding: 0 16px;
         cursor: pointer;
         font-size: 14px;
+        font-weight: 500;
         line-height: 1;
-        transition: background 120ms, opacity 120ms;
+        transition: background 150ms ease-out, border-color 150ms ease-out;
         white-space: nowrap;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
       }
 
       .action-button { background: var(--accent); color: white; }
-      .action-button:hover { opacity: 0.9; }
+      .action-button:hover { background: var(--accent-hover); }
       .ghost-button {
-        background: var(--subtle);
+        background: transparent;
         color: var(--ink);
         border: 1px solid var(--panel-border);
       }
-      .ghost-button:hover { background: var(--hover-bg); }
-      .danger-button { background: var(--danger); color: white; }
-      .danger-button:hover { opacity: 0.88; }
+      .ghost-button:hover { background: var(--subtle); }
+      .danger-button { background: transparent; color: var(--danger); border: 1px solid var(--panel-border); }
+      .danger-button:hover { background: var(--danger-soft); border-color: var(--danger); }
       button:disabled { opacity: 0.4; cursor: not-allowed; }
 
       .theme-toggle {
@@ -194,22 +216,28 @@ INDEX_HTML = """<!doctype html>
         font-size: 18px;
         cursor: pointer;
         padding: 8px;
-        border-radius: 8px;
+        border-radius: 6px;
+        height: 40px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
       }
-      .theme-toggle:hover { background: var(--hover-bg); }
+      .theme-toggle:hover { background: var(--subtle); }
 
       .filter-toggle {
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        padding: 8px 12px;
-        border-radius: 8px;
+        height: 40px;
+        padding: 0 14px;
+        border-radius: 6px;
         border: 1px solid var(--panel-border);
         background: var(--input-bg);
         color: var(--ink);
         cursor: pointer;
-        font-size: 13px;
+        font-size: 14px;
       }
+      .filter-toggle:hover { background: var(--subtle); }
       .filter-toggle .badge-dot {
         display: inline-block;
         width: 6px; height: 6px;
@@ -231,7 +259,7 @@ INDEX_HTML = """<!doctype html>
 
       .quick-btn {
         padding: 8px 12px;
-        border-radius: 8px;
+        border-radius: 6px;
         border: 1px solid var(--panel-border);
         background: var(--input-bg);
         color: var(--muted);
@@ -488,7 +516,7 @@ INDEX_HTML = """<!doctype html>
         display: inline-flex;
         align-items: center;
         padding: 6px 12px;
-        border-radius: 8px;
+        border-radius: 6px;
         background: var(--accent-soft);
         color: var(--accent);
         font-size: 13px;
@@ -521,7 +549,7 @@ INDEX_HTML = """<!doctype html>
       }
       table { width: 100%; border-collapse: collapse; min-width: 680px; }
       .col-send { width: 64px; }
-      .col-hours { width: 100px; }
+      .col-hours { width: 170px; }
       .col-activity { width: 180px; }
       .col-comments { width: 300px; }
       .col-check { width: 180px; }
@@ -561,20 +589,83 @@ INDEX_HTML = """<!doctype html>
 
       input[type="date"], input[type="number"], input[type="text"], select, textarea {
         width: 100%;
-        padding: 9px 11px;
-        border-radius: 8px;
+        height: 40px;
+        padding: 0 12px;
+        border-radius: 6px;
         border: 1px solid var(--panel-border);
         background: var(--input-bg);
         color: var(--ink);
-        transition: border-color 120ms;
+        transition: border-color 150ms ease-out;
       }
       input:focus, select:focus, textarea:focus {
-        outline: 2px solid var(--accent);
+        outline: 2px solid var(--accent-soft);
         outline-offset: 1px;
         border-color: var(--accent);
       }
-      textarea { min-height: 80px; resize: vertical; }
-      .hours-input { max-width: 96px; }
+      input::placeholder, textarea::placeholder { color: var(--muted); }
+      textarea { height: auto; min-height: 88px; padding: 10px 12px; resize: vertical; line-height: 1.55; }
+      /* 工時填寫 comment textarea: 預設單行高度同 input，用戶可拖曳下緣展開 */
+      .comment-cell textarea {
+        min-height: 40px;
+        height: 40px;
+        padding: 9px 12px;
+        line-height: 1.4;
+        resize: vertical;
+      }
+
+      /* ─── Hours stepper (± buttons flanking number input) ─── */
+      .hours-stepper {
+        display: inline-flex;
+        align-items: stretch;
+        height: 40px;
+        max-width: 180px;
+        border: 1px solid var(--panel-border);
+        border-radius: 6px;
+        overflow: hidden;
+        background: var(--input-bg);
+        transition: border-color 150ms ease-out;
+      }
+      .hours-stepper:focus-within {
+        border-color: var(--accent);
+        outline: 2px solid var(--accent-soft);
+        outline-offset: 1px;
+      }
+      .stepper-btn {
+        width: 40px;
+        flex-shrink: 0;
+        border: 0;
+        background: var(--subtle);
+        color: var(--ink);
+        cursor: pointer;
+        font-size: 18px;
+        font-weight: 500;
+        line-height: 1;
+        padding: 0;
+        transition: background 150ms ease-out;
+      }
+      .stepper-btn:hover { background: var(--hover-bg); }
+      .stepper-btn:active { background: var(--accent-soft); color: var(--accent); }
+      .stepper-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+      .hours-stepper .hours-input {
+        border: 0;
+        border-radius: 0;
+        height: 100%;
+        width: auto;
+        flex: 1;
+        min-width: 0;
+        max-width: 80px;
+        padding: 0 4px;
+        text-align: center;
+        background: transparent;
+      }
+      .hours-stepper .hours-input:focus { outline: none; border-color: transparent; }
+      /* 隱藏 native spinner（Chrome/Safari/Edge + Firefox） */
+      .hours-input::-webkit-outer-spin-button,
+      .hours-input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+      .hours-input { -moz-appearance: textfield; appearance: textfield; }
 
       .row-errors { margin: 0; padding-left: 16px; color: var(--danger); font-size: 13px; line-height: 1.5; }
       .duplicate-chip {
@@ -608,16 +699,17 @@ INDEX_HTML = """<!doctype html>
       .sticky-actions {
         position: sticky;
         bottom: 0;
-        padding: 10px 12px;
-        margin: 12px -16px -16px;
+        padding: 12px 16px;
+        margin: 16px -16px -16px;
         background: var(--panel);
-        border-top: 1px solid var(--panel-border);
+        border-top: 1px solid var(--divider);
         display: flex;
         gap: 8px;
+        align-items: center;
         justify-content: flex-end;
         flex-wrap: wrap;
-        border-radius: 0 0 12px 12px;
-        box-shadow: 0 -4px 12px rgba(0,0,0,.06);
+        border-radius: 0 0 10px 10px;
+        box-shadow: 0 -2px 8px rgba(44,44,44,.04);
       }
       .send-note { margin-top: 10px; color: var(--muted); font-size: 13px; }
 
@@ -756,7 +848,7 @@ INDEX_HTML = """<!doctype html>
         gap: 12px;
         min-width: 220px;
         padding: 22px 28px;
-        border-radius: 14px;
+        border-radius: 10px;
         border: 1px solid var(--panel-border);
         background: var(--panel);
         box-shadow: var(--shadow-md);
@@ -804,18 +896,15 @@ INDEX_HTML = """<!doctype html>
       .modal-quick-dates button {
         flex: 1; padding: 5px 0; font-size: 12px;
         border: 1px solid var(--panel-border); border-radius: 6px;
-        background: var(--subtle); color: var(--text); cursor: pointer;
+        background: var(--subtle); color: var(--ink); cursor: pointer;
       }
       .modal-quick-dates button:hover {
         background: var(--accent); color: #fff; border-color: var(--accent);
       }
       .modal-date-warn {
-        background: #fef3c7; border: 1px solid #f59e0b;
+        background: var(--warn-bg-strong); border: 1px solid var(--warn-border);
         border-radius: 6px; padding: 8px 10px;
-        font-size: 12px; color: #92400e; margin-bottom: 12px;
-      }
-      [data-theme="dark"] .modal-date-warn {
-        background: #451a03; border-color: #d97706; color: #fde68a;
+        font-size: 12px; color: var(--warn-text); margin-bottom: 12px;
       }
       .modal-summary { font-size: 13px; color: var(--muted); margin: 0; }
       .modal-footer {
@@ -891,13 +980,15 @@ INDEX_HTML = """<!doctype html>
       .entry-title-text { flex: 1; min-width: 0; }
       .entry-phrase-select {
         flex-shrink: 0;
+        width: auto;
         max-width: 180px;
+        height: 32px;
         font-size: 12px;
-        padding: 4px 6px;
+        padding: 0 8px;
         border: 1px solid var(--panel-border);
         border-radius: 6px;
         background: var(--panel);
-        color: var(--text);
+        color: var(--ink);
         cursor: pointer;
       }
       @media (max-width: 767px) {
@@ -954,7 +1045,7 @@ INDEX_HTML = """<!doctype html>
       /* ─── Settings page legacy (kept for class reuse) ───── */
       .settings-section {
         border: 1px solid var(--panel-border);
-        border-radius: 12px;
+        border-radius: 10px;
         overflow: hidden;
         margin-bottom: 12px;
         background: var(--panel);
@@ -990,7 +1081,7 @@ INDEX_HTML = """<!doctype html>
       .theme-option-group { display: flex; gap: 6px; }
       .theme-option {
         padding: 7px 14px;
-        border-radius: 8px;
+        border-radius: 6px;
         border: 1px solid var(--panel-border);
         background: transparent;
         color: var(--muted);
@@ -1185,10 +1276,10 @@ INDEX_HTML = """<!doctype html>
           </div>
           <div class="batch-meta">
             <label class="field-stack">
-              <span>工時日期</span>
+              <span id="batch-spent-on-label">工時日期</span>
               <input id="batch-spent-on" type="date">
             </label>
-            <div class="date-quick-buttons">
+            <div class="date-quick-buttons" id="date-quick-buttons">
               <button class="quick-btn" data-spent-on-offset="1">昨天</button>
               <button class="quick-btn" data-spent-on-offset="2">前天</button>
               <button class="quick-btn" data-spent-on-offset="3">三天前</button>
@@ -1199,7 +1290,7 @@ INDEX_HTML = """<!doctype html>
           <div class="table-wrap" id="table-wrap"></div>
           <div class="sticky-actions" id="sticky-actions">
             <span class="muted" id="sticky-summary">至少填入一筆工時後即可送出。</span>
-            <button class="danger-button" id="commit-button">送出工時</button>
+            <button class="action-button" id="commit-button">送出工時</button>
           </div>
           <div class="sticky-actions" id="sticky-actions-schedule" style="display:none;">
             <span class="muted">送出會用目前的甘特分配，更新每筆 issue 的起迄日期</span>
@@ -1218,7 +1309,7 @@ INDEX_HTML = """<!doctype html>
         </div>
         <div class="settings-tabs" role="tablist">
           <button class="settings-tab active" data-settings-tab="appearance" role="tab">外觀</button>
-          <button class="settings-tab" data-settings-tab="phrases" role="tab">常用語句</button>
+          <button class="settings-tab" data-settings-tab="phrases" role="tab">工時模板</button>
           <button class="settings-tab" data-settings-tab="sources" role="tab">PJ 篩選器</button>
           <button class="settings-tab" data-settings-tab="about" role="tab">關於</button>
         </div>
@@ -1255,7 +1346,7 @@ INDEX_HTML = """<!doctype html>
                 <textarea id="phrase-comments-input"></textarea>
               </label>
               <div>
-                <button class="action-button" id="phrase-add-button">儲存語句</button>
+                <button class="action-button" id="phrase-add-button">儲存模板</button>
                 <button class="ghost-button" id="phrase-cancel-button" style="display:none;">取消編輯</button>
               </div>
             </div>

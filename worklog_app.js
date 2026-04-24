@@ -625,8 +625,8 @@ function renderRow(entry) {
   const isFocused = lastFocusedEntryId === entry.issue_id;
 
   const phraseOptions = state.phrases.length
-    ? `<select class="entry-phrase-select" data-apply-phrase-select data-issue-id="${entry.issue_id}" title="套用常用語句到此筆">
-         <option value="">套用語句...</option>
+    ? `<select class="entry-phrase-select" data-apply-phrase-select data-issue-id="${entry.issue_id}" title="快速填入此筆">
+         <option value="">快速填入...</option>
          ${state.phrases.map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.label || "(未命名)")}</option>`).join("")}
        </select>`
     : "";
@@ -651,7 +651,11 @@ function renderRow(entry) {
         </td>
         <td>
           <span class="mobile-label">時數</span>
-          <input class="hours-input" type="number" step="0.1" min="0.1" value="${escapeHtml(entry.hours || "")}" data-row-field="hours" data-issue-id="${entry.issue_id}" placeholder="例如 1.5">
+          <div class="hours-stepper">
+            <button type="button" class="stepper-btn" data-hours-step="-0.5" data-issue-id="${entry.issue_id}" aria-label="減 0.5 小時">−</button>
+            <input class="hours-input" type="number" step="0.5" min="0" max="24" value="${escapeHtml(entry.hours || "")}" data-row-field="hours" data-issue-id="${entry.issue_id}" placeholder="1.5">
+            <button type="button" class="stepper-btn" data-hours-step="0.5" data-issue-id="${entry.issue_id}" aria-label="加 0.5 小時">+</button>
+          </div>
         </td>
         <td>
           <span class="mobile-label">活動類型</span>
@@ -706,6 +710,22 @@ function bindTableEvents() {
     });
   }
 
+  for (const btn of elements.tableWrap.querySelectorAll("[data-hours-step]")) {
+    btn.addEventListener("click", (event) => {
+      const issueId = Number(event.currentTarget.dataset.issueId);
+      const step = parseFloat(event.currentTarget.dataset.hoursStep);
+      const entry = state.draftEntries.find((item) => item.issue_id === issueId);
+      if (!entry) return;
+      const current = parseFloat(entry.hours) || 0;
+      let next = Math.max(0, Math.min(24, current + step));
+      next = Math.round(next * 10) / 10;
+      entry.hours = next === 0 ? "" : String(next);
+      clearEntryPreviewState(entry);
+      invalidatePreview(true);
+      renderAll();
+    });
+  }
+
   for (const btn of elements.tableWrap.querySelectorAll("[data-remove-draft]")) {
     btn.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -744,6 +764,10 @@ function updateButtons() {
   if (elements.dailyTotalBadge) {
     elements.dailyTotalBadge.style.display = isSchedule ? "none" : "";
   }
+  const batchLabel = document.getElementById("batch-spent-on-label");
+  if (batchLabel) batchLabel.textContent = isSchedule ? "開始排程日期" : "工時日期";
+  const quickBtns = document.getElementById("date-quick-buttons");
+  if (quickBtns) quickBtns.style.display = isSchedule ? "none" : "";
   elements.refreshButton.disabled = state.isLoading;
   elements.selectAllButton.disabled = isSchedule || state.isLoading || filteredIssues().length === 0;
   elements.clearSelectionButton.disabled = state.isLoading || selectedCount() === 0;
@@ -815,7 +839,8 @@ function renderTable() {
       });
       return;
     }
-    elements.workbenchSummary.textContent = `依序填入本週一到下週五，每日上限 ${state.dailyHourLimit}h`;
+    const startText = state.batchSpentOn || "請先設定開始排程日期";
+    elements.workbenchSummary.textContent = `自 ${startText} 起連續十個工作日，每日上限 ${state.dailyHourLimit}h`;
     elements.tableWrap.innerHTML = renderScheduleGantt();
     return;
   }
@@ -823,13 +848,13 @@ function renderTable() {
     elements.workbenchSummary.textContent = "先從左側勾選要補登工時的 issue。";
     elements.tableWrap.innerHTML = `
       <div class="empty-state">
-        這裡會顯示批次工時表單。勾選 issue 後逐列填寫時數、活動與備註；備註可用側邊欄的常用語句一鍵套用。
+        這裡會顯示批次工時表單。勾選 issue 後逐列填寫時數、活動與備註；每列右上角可快速填入預設的工時模板。
       </div>
     `;
     return;
   }
 
-  const focusedLabel = lastFocusedEntryId ? `目前列：#${lastFocusedEntryId}` : "未選定目前列（常用語句會要求先點任一列）";
+  const focusedLabel = lastFocusedEntryId ? `目前列：#${lastFocusedEntryId}` : "尚未點選任一列";
   elements.workbenchSummary.textContent = `已選 ${state.draftEntries.length} 筆 issue · ${focusedLabel} · 工時日期：${state.batchSpentOn || "未設定"}`;
   elements.tableWrap.innerHTML = `
     <table>
@@ -855,15 +880,23 @@ function renderTable() {
   bindTableEvents();
 }
 
-function workingDays(minCount = 10) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const dow = today.getDay();
-  const daysFromMonday = dow === 0 ? 6 : dow - 1;
-  const monday = new Date(today);
-  monday.setDate(today.getDate() - daysFromMonday);
+function workingDays(minCount = 10, baseDateStr) {
+  // baseDateStr (YYYY-MM-DD) = schedule base day. If omitted, fall back to
+  // state.batchSpentOn or today's Monday (legacy behaviour).
+  let start;
+  if (baseDateStr) {
+    const [y, m, d] = baseDateStr.split("-").map(Number);
+    start = new Date(y, (m || 1) - 1, d || 1);
+  } else {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dow = today.getDay();
+    const daysFromMonday = dow === 0 ? 6 : dow - 1;
+    start = new Date(today);
+    start.setDate(today.getDate() - daysFromMonday);
+  }
   const days = [];
-  const cursor = new Date(monday);
+  const cursor = new Date(start);
   const cap = 365;
   while (days.length < minCount) {
     const wd = cursor.getDay();
@@ -950,7 +983,7 @@ function computeSchedule() {
     }
   }
   const daysNeeded = Math.max(10, Math.ceil(totalDemand / limit) + 1);
-  const days = workingDays(daysNeeded);
+  const days = workingDays(daysNeeded, state.batchSpentOn);
   const budgetsLeft = days.map(() => limit);
   const allocations = days.map(() => []);
   for (const pid of state.scheduleProjectOrder) {
@@ -1376,7 +1409,7 @@ function phrasePresetLabel(phrase) {
 function renderPhrasesDrawer() {
   renderPhraseActivityField();
   if (!state.phrases.length) {
-    elements.phrasesList.innerHTML = `<div class="empty-state">還沒有常用語句。用上方表單新增後，按「套用」即可一次帶入時數 / 活動 / 備註到目前列。</div>`;
+    elements.phrasesList.innerHTML = `<div class="empty-state">還沒有工時模板。用上方表單建立常用的時數 / 活動 / 備註組合，之後在每筆工時右上角的「快速填入」下拉就能直接套用。</div>`;
     return;
   }
   elements.phrasesList.innerHTML = state.phrases
@@ -1407,9 +1440,9 @@ function renderPhrasesDrawer() {
     btn.addEventListener("click", async (event) => {
       event.stopPropagation();
       const phraseId = event.currentTarget.dataset.deletePhrase;
-      if (!confirm("確定要刪除這筆常用語句？")) return;
+      if (!confirm("確定要刪除這筆工時模板？")) return;
       try {
-        await withLoading("刪除常用語句中...", () => deletePhraseById(phraseId));
+        await withLoading("刪除工時模板中...", () => deletePhraseById(phraseId));
         renderPhrasesDrawer();
       } catch (error) {
         state.phrasesWarnings = [error.message || String(error)];
@@ -1462,7 +1495,7 @@ function resetPhraseForm() {
   elements.phraseHoursInput.value = "";
   setPhraseActivityValue("");
   elements.phraseCommentsInput.value = "";
-  elements.phraseAddButton.textContent = "儲存語句";
+  elements.phraseAddButton.textContent = "儲存模板";
   elements.phraseCancelButton.style.display = "none";
 }
 
@@ -1911,7 +1944,7 @@ for (const btn of elements.settingsModal.querySelectorAll("[data-settings-tab]")
 
 elements.phraseAddButton.addEventListener("click", async () => {
   try {
-    await withLoading("儲存常用語句中...", addOrUpdatePhrase);
+    await withLoading("儲存工時模板中...", addOrUpdatePhrase);
     renderPhrasesDrawer();
     renderAlerts();
   } catch (error) {
