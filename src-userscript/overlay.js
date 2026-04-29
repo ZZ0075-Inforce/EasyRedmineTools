@@ -1,0 +1,315 @@
+/* ===== Floating launcher + overlay mount =================================== */
+const OVERLAY_ROOT_ID = "__worklog_root";
+const LAUNCHER_ID = "__worklog_launcher";
+const BACKDROP_ID = "__worklog_backdrop";
+const CLOSE_BTN_ID = "__worklog_close";
+
+const LAUNCHER_CSS = `
+#${LAUNCHER_ID} {
+  position: fixed !important;
+  right: 20px;
+  bottom: 20px;
+  z-index: 2147483645 !important;
+  width: 52px; height: 52px;
+  border-radius: 50%; border: 0;
+  background: #d13a3a; color: #fff;
+  font-size: 22px;
+  box-shadow: 0 4px 12px rgba(0,0,0,.25);
+  cursor: grab; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: transform 150ms ease-out, box-shadow 150ms ease-out;
+  font-family: "PingFang TC", "Microsoft JhengHei", sans-serif;
+  user-select: none;
+  touch-action: none;
+}
+#${LAUNCHER_ID}:hover { transform: scale(1.05); box-shadow: 0 6px 16px rgba(0,0,0,.3); }
+#${LAUNCHER_ID}:active, #${LAUNCHER_ID}.is-dragging { cursor: grabbing; transform: scale(0.96); }
+
+#${BACKDROP_ID} {
+  position: fixed !important;
+  inset: 0 !important;
+  background: rgba(0,0,0,.45);
+  z-index: 2147483646 !important;
+  animation: __worklog_fade_in 150ms ease-out;
+}
+@keyframes __worklog_fade_in { from { opacity: 0; } to { opacity: 1; } }
+
+#${OVERLAY_ROOT_ID} {
+  position: fixed !important;
+  top: 32px !important;
+  left: 32px !important;
+  right: 32px !important;
+  bottom: 32px !important;
+  /* 必須覆寫 body→__worklog_root scoping 帶來的 min-height: 100vh */
+  min-height: 0 !important;
+  height: auto !important;
+  max-height: calc(100vh - 64px) !important;
+  z-index: 2147483647 !important;
+  background: var(--bg, #f9f5f1);
+  border: 1px solid var(--panel-border, #e8e2da);
+  border-radius: 14px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.3);
+  overflow: hidden;  /* 外層不滾，內層 .shell 自己 scroll */
+}
+#${OVERLAY_ROOT_ID} .app-shell {
+  height: 100% !important;
+  overflow: hidden !important;
+}
+#${OVERLAY_ROOT_ID} .shell {
+  overflow-y: auto !important;
+  height: 100% !important;
+  min-height: 0 !important;
+}
+/* 強制 sticky 元素留在 overlay 內，覆寫原本 mobile 的 position:fixed */
+#${OVERLAY_ROOT_ID} .sticky-actions {
+  position: sticky !important;
+  bottom: 0 !important;
+  left: auto !important;
+  right: auto !important;
+  margin: 0 !important;
+  width: auto !important;
+  z-index: 5;
+}
+#${OVERLAY_ROOT_ID} .bottom-tab-bar {
+  position: sticky !important;
+  bottom: 0 !important;
+}
+/* details-panel 在 master 為應對 mobile 底部 tab bar 加了 80px padding，
+   但 overlay 模式下 sticky-actions 已 sticky 到 overlay 底，不需要這麼大留白 */
+#${OVERLAY_ROOT_ID} .details-panel { padding-bottom: 0 !important; }
+/* master 的 .shell { max-width: 1280px } 在 overlay 大螢幕下會強制鎖寬，
+   right 側留下大空白 → overlay 模式取消 max-width 撐滿 */
+#${OVERLAY_ROOT_ID} .shell {
+  max-width: none !important;
+  padding: 16px !important;
+  margin: 0 !important;
+}
+
+/* 防禦 Easy Redmine 頁面對 ul/li/label 的全域樣式可能干擾 issue-card 寬度。
+   list-panel 內整條 chain 強制滿寬。 */
+#${OVERLAY_ROOT_ID} .issue-list,
+#${OVERLAY_ROOT_ID} .issue-list > li,
+#${OVERLAY_ROOT_ID} .issue-card,
+#${OVERLAY_ROOT_ID} .issue-select {
+  width: 100% !important;
+  box-sizing: border-box !important;
+  margin-left: 0 !important;
+  padding-left: 0 !important;
+}
+#${OVERLAY_ROOT_ID} .issue-card {
+  padding: 10px 12px !important;
+}
+#${OVERLAY_ROOT_ID} .issue-select {
+  display: grid !important;
+  grid-template-columns: auto 1fr !important;
+}
+#${OVERLAY_ROOT_ID} .issue-select > span {
+  display: block !important;
+  width: auto !important;
+  min-width: 0 !important;
+}
+#${OVERLAY_ROOT_ID}[hidden],
+#${BACKDROP_ID}[hidden],
+#${CLOSE_BTN_ID}[hidden] { display: none !important; }
+
+#${CLOSE_BTN_ID} {
+  position: fixed !important;
+  top: 36px;
+  right: 36px;
+  z-index: 2147483648 !important;
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.9);
+  border: 1px solid rgba(0,0,0,.1);
+  color: #2c2c2c;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,.15);
+  transition: background 150ms ease-out, transform 150ms ease-out;
+}
+#${CLOSE_BTN_ID}:hover { background: #fff; transform: scale(1.05); }
+
+@media (max-width: 600px) {
+  #${OVERLAY_ROOT_ID} {
+    top: 12px !important; left: 12px !important;
+    right: 12px !important; bottom: 12px !important;
+  }
+  #${CLOSE_BTN_ID} { top: 22px; right: 22px; }
+}
+`;
+
+let __overlayMounted = false;
+let __overlayRoot = null;
+let __backdrop = null;
+let __closeBtn = null;
+
+function installLauncher() {
+  if (document.getElementById(LAUNCHER_ID)) return;
+  addCss(LAUNCHER_CSS);
+  const btn = document.createElement("button");
+  btn.id = LAUNCHER_ID;
+  btn.type = "button";
+  btn.title = "LawPJ 工時助手（可拖移）";
+  btn.setAttribute("aria-label", "開啟工時助手");
+  btn.textContent = "⏱";
+
+  // 還原上次拖移位置
+  const saved = Store.get("launcher_pos", null);
+  if (saved && saved.left && saved.top) {
+    btn.style.left = saved.left;
+    btn.style.top = saved.top;
+    btn.style.right = "auto";
+    btn.style.bottom = "auto";
+  }
+
+  attachLauncherDrag(btn);
+  document.body.appendChild(btn);
+}
+
+function attachLauncherDrag(btn) {
+  let drag = null;
+  const THRESHOLD = 4;
+
+  btn.addEventListener("pointerdown", (e) => {
+    if (e.button !== undefined && e.button !== 0) return;
+    const rect = btn.getBoundingClientRect();
+    drag = {
+      sx: e.clientX, sy: e.clientY,
+      ox: e.clientX - rect.left, oy: e.clientY - rect.top,
+      moved: false,
+    };
+    try { btn.setPointerCapture(e.pointerId); } catch {}
+    btn.classList.add("is-dragging");
+  });
+
+  btn.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const dx = Math.abs(e.clientX - drag.sx);
+    const dy = Math.abs(e.clientY - drag.sy);
+    if (!drag.moved && (dx > THRESHOLD || dy > THRESHOLD)) drag.moved = true;
+    if (!drag.moved) return;
+    const w = btn.offsetWidth, h = btn.offsetHeight;
+    let x = e.clientX - drag.ox;
+    let y = e.clientY - drag.oy;
+    x = Math.max(0, Math.min(window.innerWidth - w, x));
+    y = Math.max(0, Math.min(window.innerHeight - h, y));
+    btn.style.left = x + "px";
+    btn.style.top = y + "px";
+    btn.style.right = "auto";
+    btn.style.bottom = "auto";
+  });
+
+  function endDrag(e) {
+    if (!drag) return;
+    btn.classList.remove("is-dragging");
+    try { btn.releasePointerCapture(e.pointerId); } catch {}
+    const moved = drag.moved;
+    drag = null;
+    if (moved) {
+      Store.set("launcher_pos", {
+        left: btn.style.left || "",
+        top: btn.style.top || "",
+      });
+      // 抑制隨後的 click 事件
+      btn.__suppressClick = true;
+      setTimeout(() => { btn.__suppressClick = false; }, 50);
+    }
+  }
+  btn.addEventListener("pointerup", endDrag);
+  btn.addEventListener("pointercancel", endDrag);
+
+  btn.addEventListener("click", (e) => {
+    if (btn.__suppressClick) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
+    toggleOverlay();
+  });
+}
+
+function addCss(text) {
+  if (typeof GM_addStyle !== "undefined") { GM_addStyle(text); return; }
+  const style = document.createElement("style");
+  style.textContent = text;
+  document.head.appendChild(style);
+}
+
+function mountOverlay() {
+  if (__overlayMounted) {
+    showOverlay();
+    return;
+  }
+
+  // LAUNCHER_CSS 含 #__worklog_root 的 fixed 定位 + backdrop + close 按鈕樣式。
+  // 移除 installLauncher() 呼叫後，這些規則必須在 mountOverlay 注入，否則
+  // overlay 沒拿到 position: fixed 會掉到 body 末端（normal flow）。
+  addCss(LAUNCHER_CSS);
+  addCss(APP_CSS);
+
+  // 半透明 backdrop（點擊可關閉）
+  __backdrop = document.createElement("div");
+  __backdrop.id = BACKDROP_ID;
+  __backdrop.addEventListener("click", hideOverlay);
+  document.body.appendChild(__backdrop);
+
+  // Overlay root
+  __overlayRoot = document.createElement("div");
+  __overlayRoot.id = OVERLAY_ROOT_ID;
+  __overlayRoot.setAttribute("data-mobile-tab", "issues");
+  __overlayRoot.innerHTML = APP_HTML;
+  document.body.appendChild(__overlayRoot);
+
+  // 關閉按鈕（永遠可見、最高 z-index）
+  __closeBtn = document.createElement("button");
+  __closeBtn.id = CLOSE_BTN_ID;
+  __closeBtn.type = "button";
+  __closeBtn.textContent = "✕";
+  __closeBtn.title = "關閉（ESC）";
+  __closeBtn.setAttribute("aria-label", "關閉工時助手");
+  __closeBtn.addEventListener("click", hideOverlay);
+  document.body.appendChild(__closeBtn);
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && __overlayMounted && !__overlayRoot.hidden) {
+      hideOverlay();
+    }
+  });
+
+  // 用 SIDE_VIEWS 動態 render sidebar，跟 menu 子項共用同一份來源
+  const sideBody = __overlayRoot.querySelector(".side-nav-body");
+  if (sideBody && Array.isArray(SIDE_VIEWS)) {
+    sideBody.innerHTML = SIDE_VIEWS.map((v) => `
+      <button class="side-tab" data-side-view="${v.key}">
+        <span class="side-tab-icon">${v.icon}</span>
+        <span class="side-tab-label">${v.label}</span>
+      </button>
+    `).join("");
+  }
+
+  applySettingsPatches(__overlayRoot);
+  __initWorklogApp();
+  __overlayMounted = true;
+}
+
+function showOverlay() {
+  if (!__overlayMounted) return;
+  __overlayRoot.hidden = false;
+  __backdrop.hidden = false;
+  __closeBtn.hidden = false;
+}
+
+function hideOverlay() {
+  if (!__overlayMounted) return;
+  __overlayRoot.hidden = true;
+  __backdrop.hidden = true;
+  __closeBtn.hidden = true;
+}
+
+function toggleOverlay() {
+  if (!__overlayMounted) { mountOverlay(); return; }
+  if (__overlayRoot.hidden) showOverlay();
+  else hideOverlay();
+}

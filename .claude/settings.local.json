@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import issue_tracker, phrases_store, watched_projects_store, time_entry_api, worklog_ui; print\\('imports OK'\\)\")",
+      "Bash(PYTHONPATH=. python -m unittest worklog_selftest)",
+      "Bash(PYTHONPATH=. python -m unittest discover -s tests -p \"test_*.py\")",
+      "Bash(python issue_tracker.py serve --port 8799)",
+      "Bash(curl -s http://127.0.0.1:8799/api/saved-queries)",
+      "Bash(printf '{\"name\":\"MyGroup\",\"query_id\":762}')",
+      "Bash(curl -s -X POST http://127.0.0.1:8799/api/saved-queries -H \"Content-Type: application/json\" --data-binary @/tmp/q.json)",
+      "Bash(curl -s -X DELETE http://127.0.0.1:8799/api/saved-queries/762)",
+      "Bash(taskkill /F /PID 8704)",
+      "Bash(cmd.exe *)",
+      "Bash(printf '{\"label\":\"daily\",\"hours\":\"1.5\",\"activity_id\":9,\"comments\":\"daily ops\"}')",
+      "Bash(curl -s -X POST http://127.0.0.1:8799/api/phrases -H \"Content-Type: application/json\" --data-binary @/tmp/ph.json)",
+      "Bash(curl -s http://127.0.0.1:8799/api/phrases)",
+      "Bash(printf '{\"label\":\"empty\"}')",
+      "Bash(curl -s -X POST http://127.0.0.1:8799/api/phrases -H \"Content-Type: application/json\" --data-binary @/tmp/pe.json)",
+      "Bash(grep -E \"\\\\.\\(json|py|js|md\\)$\")"
+    ]
+  }
+}

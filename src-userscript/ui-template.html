@@ -1,0 +1,1929 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Worklog · Easy Redmine</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600&family=Noto+Serif+TC:wght@600;700&display=swap" rel="stylesheet">
+    <style>
+      /* DESIGN.md: 暖紙色 × 深灰主文字 × 品牌紅 accent */
+      :root {
+        --bg: #f9f5f1;
+        --panel: #fdfaf7;
+        --panel-border: #e8e2da;
+        --divider: #efe8e1;
+        --ink: #2c2c2c;
+        --muted: #5f5a54;
+        --accent: #d13a3a;
+        --accent-hover: #b92f2f;
+        --accent-soft: rgba(209, 58, 58, 0.08);
+        --selected-bg: rgba(209, 58, 58, 0.06);
+        --selected-border: rgba(209, 58, 58, 0.28);
+        --success: #5c7a5a;
+        --success-soft: rgba(92, 122, 90, 0.10);
+        --danger: #b93838;
+        --danger-soft: rgba(185, 56, 56, 0.08);
+        --warn-bg: rgba(183, 121, 31, 0.08);
+        --warn-bg-strong: rgba(183, 121, 31, 0.14);
+        --warn-border: rgba(183, 121, 31, 0.24);
+        --warn-text: #b7791f;
+        --shadow: 0 1px 2px rgba(44,44,44,.04);
+        --shadow-md: 0 2px 8px rgba(44,44,44,.06);
+        --input-bg: #fdfaf7;
+        --hover-bg: rgba(44, 44, 44, 0.04);
+        --card-bg: #fdfaf7;
+        --subtle: #f3ede7;
+      }
+
+      [data-theme="dark"] {
+        color-scheme: dark;
+        --bg: #1c1a17;
+        --panel: #252220;
+        --panel-border: #3a3531;
+        --divider: #302c29;
+        --ink: #f2ede7;
+        --muted: #a8a29a;
+        --accent: #e85454;
+        --accent-hover: #d13a3a;
+        --accent-soft: rgba(232, 84, 84, 0.1);
+        --selected-bg: rgba(232, 84, 84, 0.1);
+        --selected-border: rgba(232, 84, 84, 0.35);
+        --success: #86a384;
+        --success-soft: rgba(134, 163, 132, 0.14);
+        --danger: #e85454;
+        --danger-soft: rgba(232, 84, 84, 0.12);
+        --warn-bg: rgba(218, 165, 32, 0.1);
+        --warn-bg-strong: rgba(218, 165, 32, 0.18);
+        --warn-border: rgba(218, 165, 32, 0.28);
+        --warn-text: #dcb671;
+        --shadow: 0 1px 2px rgba(0,0,0,.3);
+        --shadow-md: 0 2px 8px rgba(0,0,0,.4);
+        --input-bg: #252220;
+        --hover-bg: rgba(242, 237, 231, 0.05);
+        --card-bg: #2a2624;
+        --subtle: #302c29;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: "Noto Sans TC", "Inter", "PingFang TC", "Segoe UI", sans-serif;
+        font-size: 15px;
+        line-height: 1.55;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+
+      .serif-heading {
+        font-family: "Noto Serif TC", Georgia, serif;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+
+      button, input, select, textarea { font: inherit; }
+      a { color: var(--accent); }
+      a:hover { color: var(--accent-hover); }
+
+      .shell {
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 24px 16px 44px;
+      }
+
+      /* ─── Panels ─────────────────────────────────────────── */
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 10px;
+        box-shadow: var(--shadow);
+      }
+
+      /* ─── Main view 容器（sidebar 切換時對應顯示） ─────── */
+      .main-view[hidden] { display: none !important; }
+      .main-card-view {
+        display: grid;
+        grid-template-columns: minmax(320px, 380px) 1fr;
+        grid-template-rows: auto 1fr;
+        gap: 16px 24px;
+        padding: 24px;
+        max-width: 1200px;
+        margin: 0 auto;
+        align-items: start;
+      }
+      .main-card-view .view-head { grid-column: 1 / -1; margin-bottom: 4px; }
+      .main-card-view .add-form {
+        grid-column: 1;
+        align-self: start;
+        position: sticky;
+        top: 0;
+      }
+      .main-card-view .drawer-list {
+        grid-column: 2;
+        gap: 8px;
+      }
+      .view-title {
+        font-family: "Noto Serif TC", Georgia, serif;
+        font-size: 22px;
+        font-weight: 600;
+        margin: 0 0 6px;
+        letter-spacing: -0.01em;
+      }
+      @media (max-width: 760px) {
+        .main-card-view {
+          grid-template-columns: 1fr;
+          gap: 16px;
+          padding: 16px;
+        }
+        .main-card-view .add-form,
+        .main-card-view .drawer-list { grid-column: 1; }
+        .main-card-view .add-form { position: static; }
+      }
+
+      /* ─── 批次建 issue view ─────────────────────────────── */
+      .batch-create-panel {
+        display: grid;
+        gap: 20px;
+        padding: 24px;
+        max-width: 1100px;
+        margin: 0 auto;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      .batch-create-panel .view-head { margin-bottom: 0; }
+      .batch-section { display: grid; gap: 12px; }
+      .batch-section-header {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .batch-issue-meta {
+        display: grid;
+        grid-template-columns: minmax(280px, 2fr) minmax(180px, 1fr);
+        gap: 16px;
+        align-items: end;
+      }
+      .batch-project-hint { font-size: 12px; }
+      .batch-create-panel .section-subtitle {
+        font-size: 14px;
+        font-weight: 600;
+        margin: 0;
+        color: var(--ink);
+        border-left: 3px solid var(--accent);
+        padding-left: 10px;
+        line-height: 1.2;
+      }
+      .batch-templates-picker-list {
+        display: flex; flex-wrap: wrap; gap: 8px;
+        min-height: 44px;
+        padding: 8px;
+        border: 1px solid var(--panel-border);
+        border-radius: 8px;
+        background: var(--subtle);
+      }
+      .batch-template-chip {
+        display: inline-flex; align-items: center; gap: 4px;
+        padding: 2px 4px 2px 10px;
+        border-radius: 18px;
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        font-size: 13px;
+        white-space: nowrap;
+      }
+      .batch-template-chip.checked {
+        background: var(--accent-soft);
+        border-color: var(--accent);
+      }
+      .batch-template-chip.editing {
+        background: var(--warn-bg);
+        border-color: var(--warn-border);
+      }
+      .batch-template-chip-toggle {
+        display: inline-flex; align-items: center; gap: 6px;
+        cursor: pointer; user-select: none;
+      }
+      .batch-template-chip-toggle input { margin: 0; }
+      .batch-template-chip-action {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 28px; height: 28px;
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 50%;
+        cursor: pointer;
+        color: var(--muted);
+        font-size: 14px;
+        font-family: system-ui, -apple-system, "Segoe UI Symbol", "Apple Color Emoji", sans-serif;
+        line-height: 1;
+        padding: 0;
+        transition: border-color 150ms ease-out, background 150ms ease-out, color 150ms ease-out;
+      }
+      .batch-template-chip-action:hover {
+        background: var(--subtle);
+        border-color: var(--panel-border);
+        color: var(--ink);
+      }
+      .batch-edit-banner {
+        display: flex; align-items: center; gap: 10px;
+        padding: 8px 12px;
+        background: var(--warn-bg);
+        border-left: 3px solid var(--warn-border);
+        color: var(--warn-text);
+        font-size: 13px;
+        border-radius: 4px;
+      }
+      .batch-edit-banner strong { color: var(--ink); }
+      .batch-edit-banner button { margin-left: auto; }
+      .batch-template-add {
+        display: flex; gap: 8px; align-items: center;
+      }
+      .batch-template-add input[type="text"] {
+        flex: 1; min-width: 200px;
+        /* 其他屬性沿用 global rule（行 882-891）：height 40px / padding 0 12px / border / bg */
+      }
+      .batch-row-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+      .batch-rows-table { width: 100%; border-collapse: collapse; }
+      .batch-rows-table th {
+        text-align: left; font-size: 12px; font-weight: 600;
+        color: var(--muted);
+        padding: 8px 10px; border-bottom: 1px solid var(--panel-border);
+      }
+      .batch-rows-table td {
+        padding: 8px 10px; vertical-align: middle;
+        border-bottom: 1px solid var(--divider);
+      }
+      .batch-rows-table input {
+        width: 100%; box-sizing: border-box;
+        /* height / padding / border 沿用 global rule */
+      }
+      .batch-rows-table .hours-stepper { width: 100%; }
+      .batch-rows-table th.col-subject,
+      .batch-rows-table td.col-subject { min-width: 280px; }
+      .batch-rows-table th.col-hours,
+      .batch-rows-table td.col-hours { width: 130px; }
+      .batch-rows-table th.col-date,
+      .batch-rows-table td.col-date { width: 160px; }
+      .batch-rows-table th.col-remove,
+      .batch-rows-table td.col-remove { width: 80px; text-align: right; }
+      .batch-empty-state {
+        padding: 20px;
+        text-align: center;
+        color: var(--muted);
+        font-size: 13px;
+        display: grid;
+        gap: 10px;
+        justify-items: center;
+      }
+      .batch-result-card { padding: 8px 12px; border-radius: 6px; font-size: 13px; }
+      .batch-result-card.ok {
+        background: var(--success-soft);
+        border-left: 3px solid var(--success);
+      }
+      .batch-result-card.fail {
+        background: var(--danger-soft);
+        border-left: 3px solid var(--danger);
+      }
+      .batch-create-panel .sticky-actions {
+        justify-content: space-between;
+        max-width: 1100px;
+        box-sizing: border-box;
+      }
+      .batch-create-panel #batch-summary {
+        flex: 1;
+        text-align: left;
+      }
+      .batch-create-panel #batch-summary.has-rows {
+        color: var(--ink);
+        font-weight: 500;
+      }
+      @media (max-width: 760px) {
+        .batch-create-panel { padding: 16px; }
+        .batch-issue-meta { grid-template-columns: 1fr; }
+        .batch-template-add { flex-wrap: wrap; }
+      }
+
+      /* ─── App shell (sidebar + main content, Notion-style) ── */
+      .app-shell {
+        display: grid;
+        grid-template-columns: var(--side-nav-w, 200px) 1fr;
+        height: 100%;
+        min-height: 100%;
+      }
+      .app-shell.collapsed { --side-nav-w: 56px; }
+
+      .side-nav {
+        background: var(--panel);
+        border-right: 1px solid var(--panel-border);
+        display: flex;
+        flex-direction: column;
+        padding: 12px 8px;
+        gap: 4px;
+        overflow: hidden;
+        transition: width 200ms ease;
+      }
+      .side-nav-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 4px 8px 12px;
+        border-bottom: 1px solid var(--divider);
+        margin-bottom: 8px;
+      }
+      .side-nav-brand {
+        font-family: "Noto Serif TC", Georgia, serif;
+        font-weight: 600;
+        font-size: 15px;
+        color: var(--ink);
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .side-nav-toggle {
+        flex-shrink: 0;
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 18px;
+        line-height: 1;
+        padding: 4px 8px;
+        border-radius: 4px;
+        transition: background 150ms ease-out;
+      }
+      .side-nav-toggle:hover { background: var(--subtle); color: var(--ink); }
+      .app-shell.collapsed .side-nav-toggle { transform: rotate(180deg); }
+      .app-shell.collapsed .side-nav-brand { display: none; }
+      .app-shell.collapsed .side-nav-head {
+        justify-content: center;
+        border-bottom: 0;
+        padding: 4px 0 12px;
+      }
+
+      .side-nav-body, .side-nav-foot { display: flex; flex-direction: column; gap: 2px; }
+      .side-nav-body { flex: 1 1 auto; }
+      .side-nav-foot { border-top: 1px solid var(--divider); padding-top: 8px; }
+
+      .side-tab {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        width: 100%;
+        padding: 8px 10px;
+        border: 0;
+        background: transparent;
+        color: var(--ink);
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        text-align: left;
+        border-radius: 6px;
+        transition: background 150ms ease-out, color 150ms ease-out;
+        white-space: nowrap;
+      }
+      .side-tab:hover { background: var(--subtle); }
+      .side-tab.active { background: var(--accent-soft); color: var(--accent); }
+      .side-tab-icon {
+        flex-shrink: 0;
+        font-size: 16px;
+        line-height: 1;
+        width: 22px;
+        text-align: center;
+      }
+      .side-tab-label { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
+      .app-shell.collapsed .side-tab-label { display: none; }
+      .app-shell.collapsed .side-tab { justify-content: center; padding: 10px 8px; }
+
+      /* ─── Main toolbar (source tabs only) ─────────────────── */
+      .main-toolbar { margin-bottom: 12px; overflow: hidden; }
+      .main-toolbar .source-tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 10px 14px;
+        align-items: center;
+      }
+
+      /* ─── List panel toolbar (search + actions for Issue List) */
+      .list-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+        padding: 0 0 10px;
+        margin-bottom: 10px;
+      }
+      .filter-search-input {
+        flex: 1 1 200px;
+        min-width: 160px;
+      }
+
+      /* ─── Date filter row（搜尋下方一條，動態 label） ─────── */
+      .date-filter-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 10px;
+        margin-bottom: 12px;
+        border-radius: 8px;
+        background: var(--subtle);
+        border: 1px solid var(--panel-border);
+      }
+      .date-filter-label {
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-right: 4px;
+      }
+      .date-filter-buttons { display: flex; gap: 4px; flex-wrap: wrap; }
+      .date-filter-pick {
+        flex: 0 0 auto;
+        width: auto !important;
+        height: 32px !important;
+        max-width: 160px;
+        font-size: 12px;
+        margin-left: auto;
+      }
+
+      .source-tab {
+        border: 1px solid var(--panel-border);
+        background: transparent;
+        border-radius: 6px;
+        padding: 8px 14px;
+        cursor: pointer;
+        font-size: 14px;
+        color: var(--ink);
+        white-space: nowrap;
+        transition: background 150ms ease-out, border-color 150ms ease-out;
+      }
+      .source-tab:hover { background: var(--subtle); }
+      .source-tab.active { background: var(--accent); color: white; border-color: var(--accent); }
+      .source-tab .remove { margin-left: 6px; opacity: 0.7; cursor: pointer; }
+      .source-spacer { flex: 1; }
+
+      /* ─── Toolbar inner ─────────────────────────────────── */
+      .filter-group {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: end;
+        gap: 8px;
+      }
+      .toolbar-actions, .workbench-actions, .batch-meta-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+
+      /* ─── Buttons (DESIGN.md: 40px height, radius-sm 6px) ─ */
+      .nav-button, .action-button, .ghost-button, .danger-button {
+        border: 0;
+        border-radius: 6px;
+        height: 40px;
+        padding: 0 16px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        line-height: 1;
+        transition: background 150ms ease-out, border-color 150ms ease-out;
+        white-space: nowrap;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .action-button { background: var(--accent); color: white; }
+      .action-button:hover { background: var(--accent-hover); }
+      .ghost-button {
+        background: transparent;
+        color: var(--ink);
+        border: 1px solid var(--panel-border);
+      }
+      .ghost-button:hover { background: var(--subtle); }
+      .danger-button { background: transparent; color: var(--danger); border: 1px solid var(--panel-border); }
+      .danger-button:hover { background: var(--danger-soft); border-color: var(--danger); }
+      button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+      .theme-toggle {
+        border: 0;
+        background: transparent;
+        font-size: 18px;
+        cursor: pointer;
+        padding: 8px;
+        border-radius: 6px;
+        height: 40px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .theme-toggle:hover { background: var(--subtle); }
+
+      .filter-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 40px;
+        padding: 0 14px;
+        border-radius: 6px;
+        border: 1px solid var(--panel-border);
+        background: var(--input-bg);
+        color: var(--ink);
+        cursor: pointer;
+        font-size: 14px;
+      }
+      .filter-toggle:hover { background: var(--subtle); }
+      .filter-toggle .badge-dot {
+        display: inline-block;
+        width: 6px; height: 6px;
+        border-radius: 50%;
+        background: var(--accent);
+      }
+
+      .visited-quickdates {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 10px 12px;
+        margin-bottom: 12px;
+        border: 1px solid var(--panel-border);
+        border-radius: 8px;
+        background: var(--subtle);
+      }
+      .visited-quickdates-label {
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-right: 4px;
+      }
+
+      .filter-advanced {
+        display: none;
+        gap: 10px;
+        flex-wrap: wrap;
+        padding: 12px 14px;
+        border-radius: 10px;
+        background: var(--subtle);
+        border: 1px solid var(--panel-border);
+        margin-bottom: 12px;
+      }
+      .filter-advanced.open { display: flex; }
+
+      .quick-btn {
+        padding: 8px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--panel-border);
+        background: var(--input-bg);
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 13px;
+        transition: background 120ms;
+      }
+      .quick-btn:hover { background: var(--accent-soft); color: var(--accent); }
+      .quick-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
+
+      .tiny {
+        padding: 4px 8px;
+        font-size: 12px;
+        border-radius: 6px;
+        min-width: 28px;
+      }
+
+      /* ─── Layout ─────────────────────────────────────────── */
+      .layout { display: grid; grid-template-columns: 1fr; gap: 12px; }
+      .list-panel, .details-panel { padding: 16px; }
+
+      /* ─── Issue list ─────────────────────────────────────── */
+      .workbench-header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+
+      .section-title {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .issue-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+        max-height: 620px;
+        overflow-y: auto;
+      }
+
+      .issue-card {
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid var(--panel-border);
+        border-radius: 10px;
+        background: var(--card-bg);
+        padding: 10px 12px;
+        box-shadow: var(--shadow);
+        transition: border-color 120ms;
+      }
+      .issue-card.selected {
+        background: var(--selected-bg);
+        border-color: var(--selected-border);
+      }
+
+      .issue-select {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 10px;
+        align-items: start;
+        cursor: pointer;
+        width: 100%;
+      }
+      .issue-select > span { display: block; min-width: 0; }
+      .issue-checkbox {
+        width: 18px; height: 18px;
+        margin-top: 2px;
+        cursor: pointer;
+        accent-color: var(--accent);
+      }
+
+      .issue-heading-line {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .issue-id { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+      .issue-date { color: var(--muted); font-size: 12px; margin-left: auto; }
+      .issue-title { font-size: 14px; line-height: 1.4; flex: 1 1 auto; }
+
+      .tag-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+      .tag {
+        display: inline-flex;
+        padding: 2px 8px;
+        border-radius: 6px;
+        background: var(--subtle);
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .count-badge {
+        display: inline-flex;
+        padding: 1px 8px;
+        border-radius: 6px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-size: 12px;
+        margin-left: 6px;
+      }
+
+      /* ─── Project groups ──────────────────────────────────── */
+      .project-group { list-style: none; }
+      .project-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        background: var(--selected-bg);
+        border-radius: 8px;
+        cursor: pointer;
+        user-select: none;
+        margin-bottom: 6px;
+        border: 1px solid transparent;
+      }
+      .project-header:hover { background: var(--accent-hover); border-color: var(--selected-border); }
+      .group-arrow { color: var(--accent); font-size: 12px; width: 12px; }
+      .group-name { flex: 1 1 auto; font-size: 14px; }
+      .group-count { padding: 1px 8px; border-radius: 6px; background: var(--subtle); color: var(--muted); font-size: 12px; }
+      .group-selected { font-size: 12px; color: var(--accent); }
+      .group-issues { list-style: none; padding: 0 0 0 12px; margin: 0 0 8px; display: grid; gap: 6px; }
+
+      /* ─── Schedule ────────────────────────────────────────── */
+      .sched-project {
+        list-style: none;
+        padding: 10px 12px;
+        border: 1px solid var(--panel-border);
+        border-radius: 10px;
+        background: var(--card-bg);
+        margin-bottom: 8px;
+        box-shadow: var(--shadow);
+      }
+      .sched-project-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+      .sched-issue { padding: 6px 0; border-top: 1px dashed var(--panel-border); }
+      .sched-issue-line { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; flex-wrap: wrap; }
+      .sched-issue-budget { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+      .sched-budget-label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+      .sched-budget { width: 70px; padding: 4px 8px; }
+
+      .gantt-days { display: grid; gap: 8px; }
+      .gantt-day {
+        border: 1px solid var(--panel-border);
+        border-radius: 10px;
+        padding: 10px 12px;
+        background: var(--card-bg);
+        box-shadow: var(--shadow);
+      }
+      .gantt-day.full { border-color: var(--selected-border); background: var(--selected-bg); }
+      .gantt-day.empty { opacity: 0.65; }
+      .gantt-day.partial { border-color: var(--warn-border); }
+      .gantt-day-head { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 13px; }
+      .gantt-items { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+      .gantt-items li { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+      .gantt-hours {
+        display: inline-flex;
+        padding: 2px 8px;
+        border-radius: 6px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-weight: 600;
+        min-width: 44px;
+        justify-content: center;
+        font-size: 12px;
+      }
+      .gantt-issue { flex: 1 1 auto; }
+
+      .sched-select-card {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 14px;
+        border: 1px solid var(--panel-border);
+        border-radius: 10px;
+        background: var(--card-bg);
+        cursor: pointer;
+        transition: all 120ms;
+        box-shadow: var(--shadow);
+      }
+      .sched-select-card:hover { background: var(--hover-bg); }
+      .sched-select-card.selected { border-color: var(--accent); background: var(--selected-bg); }
+      .sched-select-card input[type="checkbox"] { width: auto; transform: scale(1.2); cursor: pointer; accent-color: var(--accent); }
+      .sched-select-main { flex: 1 1 auto; }
+      .sched-select-title { margin: 0 0 4px; font-size: 14px; font-weight: 600; }
+      .sched-select-meta { font-size: 12px; color: var(--muted); }
+
+      .sched-footer-bar {
+        position: sticky;
+        bottom: 0;
+        margin-top: 12px;
+        padding: 10px 14px;
+        border-radius: 10px;
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        box-shadow: var(--shadow-md);
+      }
+      .sched-breadcrumb { margin-bottom: 10px; }
+
+      .sched-project.drag-over,
+      .sched-issue.drag-over { outline: 2px dashed var(--accent); outline-offset: 2px; }
+      .sched-project[draggable="true"],
+      .sched-issue[draggable="true"] { cursor: grab; }
+      .sched-project[draggable="true"]:active,
+      .sched-issue[draggable="true"]:active { cursor: grabbing; }
+
+      .budget-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 10px;
+        border-radius: 6px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-size: 13px;
+        cursor: pointer;
+        border: 0;
+      }
+      .budget-badge.override { background: var(--warn-bg); color: var(--warn-text); }
+      .budget-badge .clear-override { font-size: 11px; opacity: 0.7; }
+      .budget-input { width: 80px !important; padding: 4px 8px !important; font-size: 13px; }
+
+      /* ─── Batch worklog ───────────────────────────────────── */
+      .batch-meta {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: end;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+        padding: 12px 14px;
+        border-radius: 10px;
+        background: var(--subtle);
+        border: 1px solid var(--panel-border);
+      }
+      .date-quick-buttons { display: flex; gap: 6px; align-self: end; }
+      .field-stack { display: grid; gap: 6px; min-width: 200px; }
+      .field-stack.compact { min-width: 160px; }
+      .field-stack span {
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .daily-total-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 6px 12px;
+        border-radius: 6px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-size: 13px;
+        font-weight: 600;
+        border: 1px solid var(--selected-border);
+      }
+      .daily-total-badge.overflow {
+        background: var(--warn-bg-strong);
+        color: var(--warn-text);
+        border-color: var(--warn-border);
+      }
+
+      .alert-stack { display: grid; gap: 8px; margin-bottom: 12px; }
+      .alert {
+        padding: 12px 14px;
+        border-radius: 10px;
+        border: 1px solid var(--panel-border);
+        background: var(--card-bg);
+        line-height: 1.6;
+        font-size: 14px;
+      }
+      .alert.warn { background: var(--warn-bg); border-color: var(--warn-border); }
+
+      /* ─── Worklog table ───────────────────────────────────── */
+      .table-wrap {
+        overflow-x: auto;
+        border: 1px solid var(--panel-border);
+        border-radius: 10px;
+        background: var(--card-bg);
+      }
+      table { width: 100%; border-collapse: collapse; min-width: 680px; }
+      .col-send { width: 64px; }
+      .col-hours { width: 170px; }
+      .col-activity { width: 180px; }
+      .col-comments { width: 300px; }
+      .col-check { width: 180px; }
+
+      th, td { padding: 10px 12px; border-bottom: 1px solid var(--panel-border); vertical-align: top; }
+      th {
+        text-align: left;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+        background: var(--subtle);
+      }
+
+      /* Issue 標題行（佔滿整列） */
+      .entry-issue-row td {
+        padding: 10px 14px 6px;
+        background: var(--subtle);
+        border-bottom: 0;
+        font-size: 14px;
+        line-height: 1.4;
+      }
+      .entry-issue-id { color: var(--muted); font-size: 12px; margin-right: 6px; font-variant-numeric: tabular-nums; }
+      .entry-issue-label { font-weight: 500; word-break: break-word; }
+      .entry-issue-link { color: var(--accent); font-size: 13px; margin-left: 8px; text-decoration: none; opacity: 0.8; }
+      .entry-issue-link:hover { opacity: 1; }
+
+      /* 欄位行 */
+      .entry-fields-row td { padding: 8px 12px 10px; border-bottom: 0; }
+
+      /* Entry 群組分隔線 */
+      tbody + tbody .entry-issue-row td { border-top: 1px solid var(--panel-border); }
+
+      /* 焦點高亮（移至 tbody 層） */
+      tbody.row-focused .entry-issue-row td { background: var(--selected-bg); }
+      tbody.row-focused .entry-fields-row td { background: var(--accent-soft); }
+
+      input[type="date"], input[type="number"], input[type="text"], select, textarea {
+        width: 100%;
+        height: 40px;
+        padding: 0 12px;
+        border-radius: 6px;
+        border: 1px solid var(--panel-border);
+        background: var(--input-bg);
+        color: var(--ink);
+        transition: border-color 150ms ease-out;
+      }
+      input:focus, select:focus, textarea:focus {
+        outline: 2px solid var(--accent-soft);
+        outline-offset: 1px;
+        border-color: var(--accent);
+      }
+      input::placeholder, textarea::placeholder { color: var(--muted); }
+      textarea { height: auto; min-height: 88px; padding: 10px 12px; resize: vertical; line-height: 1.55; }
+      /* 工時填寫 comment textarea: 預設單行高度同 input，用戶可拖曳下緣展開 */
+      .comment-cell textarea {
+        min-height: 40px;
+        height: 40px;
+        padding: 9px 12px;
+        line-height: 1.4;
+        resize: vertical;
+      }
+
+      /* ─── Hours stepper (± buttons flanking number input) ─── */
+      .hours-stepper {
+        display: inline-flex;
+        align-items: stretch;
+        height: 40px;
+        max-width: 180px;
+        border: 1px solid var(--panel-border);
+        border-radius: 6px;
+        overflow: hidden;
+        background: var(--input-bg);
+        transition: border-color 150ms ease-out;
+      }
+      .hours-stepper:focus-within {
+        border-color: var(--accent);
+        outline: 2px solid var(--accent-soft);
+        outline-offset: 1px;
+      }
+      .stepper-btn {
+        width: 40px;
+        flex-shrink: 0;
+        border: 0;
+        background: var(--subtle);
+        color: var(--ink);
+        cursor: pointer;
+        font-size: 18px;
+        font-weight: 500;
+        line-height: 1;
+        padding: 0;
+        transition: background 150ms ease-out;
+      }
+      .stepper-btn:hover { background: var(--hover-bg); }
+      .stepper-btn:active { background: var(--accent-soft); color: var(--accent); }
+      .stepper-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+      .hours-stepper .hours-input {
+        border: 0;
+        border-radius: 0;
+        height: 100%;
+        width: auto;
+        flex: 1;
+        min-width: 0;
+        max-width: 80px;
+        padding: 0 4px;
+        text-align: center;
+        background: transparent;
+      }
+      .hours-stepper .hours-input:focus { outline: none; border-color: transparent; }
+      /* 隱藏 native spinner（Chrome/Safari/Edge + Firefox） */
+      .hours-input::-webkit-outer-spin-button,
+      .hours-input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+      .hours-input { -moz-appearance: textfield; appearance: textfield; }
+
+      .row-errors { margin: 0; padding-left: 16px; color: var(--danger); font-size: 13px; line-height: 1.5; }
+      .duplicate-chip {
+        display: inline-flex;
+        margin-bottom: 6px;
+        padding: 4px 10px;
+        border-radius: 6px;
+        background: var(--warn-bg);
+        color: var(--warn-text);
+        font-size: 12px;
+        border: 1px solid var(--warn-border);
+      }
+      .duplicate-list, .result-list { margin: 0; padding-left: 16px; color: var(--muted); line-height: 1.55; }
+
+      /* Mobile label spans — visible only on mobile */
+      .mobile-label { display: none; }
+
+      .draft-remove {
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 16px;
+        padding: 4px 6px;
+        border-radius: 6px;
+        line-height: 1;
+      }
+      .draft-remove:hover { background: var(--danger-soft); color: var(--danger); }
+
+      /* ─── Sticky actions ──────────────────────────────────── */
+      .sticky-actions {
+        position: sticky;
+        bottom: 0;
+        padding: 12px 16px;
+        margin: 16px -16px -16px;
+        background: var(--panel);
+        border-top: 1px solid var(--divider);
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        justify-content: flex-end;
+        flex-wrap: wrap;
+        border-radius: 0 0 10px 10px;
+        box-shadow: 0 -2px 8px rgba(44,44,44,.04);
+      }
+      .send-note { margin-top: 10px; color: var(--muted); font-size: 13px; }
+
+      /* ─── Misc helpers ────────────────────────────────────── */
+      .empty-state {
+        padding: 20px;
+        border-radius: 10px;
+        background: var(--hover-bg);
+        color: var(--muted);
+        line-height: 1.7;
+        font-size: 14px;
+      }
+      .muted { color: var(--muted); }
+      .helper-copy { color: var(--muted); line-height: 1.6; }
+      .project-picker-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; }
+      .phrase-field-grid { display: grid; grid-template-columns: 1fr 1.4fr; gap: 10px; }
+      .phrase-preset-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+      .preset-chip {
+        display: inline-flex;
+        padding: 3px 8px;
+        border-radius: 6px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-size: 12px;
+      }
+      .insert-btn {
+        display: inline-flex;
+        padding: 5px 10px;
+        border-radius: 6px;
+        border: 0;
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .comment-cell { position: relative; }
+      .phrase-chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+      .phrase-chip {
+        display: inline-flex;
+        padding: 3px 10px;
+        border-radius: 6px;
+        border: 1px solid var(--selected-border);
+        background: var(--selected-bg);
+        color: var(--accent);
+        font-size: 12px;
+        cursor: pointer;
+        max-width: 180px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      /* ─── Drawers ─────────────────────────────────────────── */
+      .drawer-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.38);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 180ms ease;
+        z-index: 5;
+      }
+      .drawer-backdrop.open { opacity: 1; pointer-events: auto; }
+
+      .drawer {
+        position: fixed;
+        top: 0; right: 0; bottom: 0;
+        width: min(480px, 100vw);
+        padding: 20px 16px 24px;
+        background: var(--panel);
+        color: var(--ink);
+        border-left: 1px solid var(--panel-border);
+        box-shadow: var(--shadow-md);
+        transform: translateX(100%);
+        transition: transform 180ms ease;
+        overflow-y: auto;
+        z-index: 10;
+      }
+      .drawer.open { transform: translateX(0); }
+
+      .drawer-header { display: flex; align-items: start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+      .drawer-title { margin: 0; font-size: 20px; }
+      .drawer-summary { margin-bottom: 14px; color: var(--muted); line-height: 1.65; font-size: 14px; }
+      .drawer-list { display: grid; gap: 10px; }
+
+      .item-card {
+        padding: 12px;
+        border-radius: 10px;
+        border: 1px solid var(--panel-border);
+        background: var(--card-bg);
+        display: grid;
+        gap: 8px;
+      }
+      .item-head { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+      .item-title { margin: 0; font-size: 14px; }
+      .phrase-text {
+        margin: 0;
+        white-space: pre-wrap;
+        color: var(--ink);
+        background: var(--hover-bg);
+        padding: 8px 10px;
+        border-radius: 8px;
+        cursor: pointer;
+        line-height: 1.5;
+        font-size: 14px;
+      }
+      .phrase-text:hover { background: var(--accent-soft); }
+      .phrase-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+      .add-form {
+        display: grid;
+        gap: 10px;
+        padding: 12px;
+        border-radius: 10px;
+        background: var(--accent-soft);
+        border: 1px solid var(--selected-border);
+        margin-bottom: 12px;
+      }
+
+      /* ─── Loading ─────────────────────────────────────────── */
+      .loading-mask {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background: rgba(15, 23, 42, 0.35);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 140ms ease;
+        z-index: 40;
+      }
+      .loading-mask.open { opacity: 1; pointer-events: auto; }
+      .loading-card {
+        display: grid;
+        justify-items: center;
+        gap: 12px;
+        min-width: 220px;
+        padding: 22px 28px;
+        border-radius: 10px;
+        border: 1px solid var(--panel-border);
+        background: var(--panel);
+        box-shadow: var(--shadow-md);
+      }
+      .spinner {
+        width: 32px; height: 32px;
+        border-radius: 50%;
+        border: 3px solid var(--accent-soft);
+        border-top-color: var(--accent);
+        animation: spin 0.8s linear infinite;
+      }
+      @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+      /* ─── Commit Confirmation Modal ───────────────────────── */
+      .modal-overlay {
+        position: fixed; inset: 0; z-index: 50;
+        background: rgba(15,23,42,.5);
+        display: flex; align-items: center; justify-content: center;
+        padding: 16px;
+      }
+      .modal-overlay[hidden] { display: none; }
+      .modal-box {
+        background: var(--panel); border: 1px solid var(--panel-border);
+        border-radius: 14px; width: 100%; max-width: 400px;
+        box-shadow: 0 12px 40px rgba(0,0,0,.22);
+      }
+      .modal-header {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 16px 20px 12px; border-bottom: 1px solid var(--panel-border);
+      }
+      .modal-header h3 { margin: 0; font-size: 15px; font-weight: 600; }
+      .modal-x {
+        background: none; border: none; cursor: pointer;
+        font-size: 18px; color: var(--muted); line-height: 1;
+        padding: 2px 7px; border-radius: 4px;
+      }
+      .modal-x:hover { background: var(--subtle); }
+      .modal-body { padding: 16px 20px; }
+      .modal-date-row {
+        display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
+      }
+      .modal-date-label { font-size: 13px; font-weight: 500; white-space: nowrap; }
+      .modal-date-row input[type="date"] { flex: 1; }
+      .modal-quick-dates { display: flex; gap: 6px; margin-bottom: 14px; }
+      .modal-quick-dates button {
+        flex: 1; padding: 5px 0; font-size: 12px;
+        border: 1px solid var(--panel-border); border-radius: 6px;
+        background: var(--subtle); color: var(--ink); cursor: pointer;
+      }
+      .modal-quick-dates button:hover {
+        background: var(--accent); color: #fff; border-color: var(--accent);
+      }
+      .modal-date-warn {
+        background: var(--warn-bg-strong); border: 1px solid var(--warn-border);
+        border-radius: 6px; padding: 8px 10px;
+        font-size: 12px; color: var(--warn-text); margin-bottom: 12px;
+      }
+      .modal-summary { font-size: 13px; color: var(--muted); margin: 0; }
+      .modal-footer {
+        display: flex; justify-content: flex-end; gap: 8px;
+        padding: 12px 20px 16px; border-top: 1px solid var(--panel-border);
+      }
+
+      /* Settings modal — 左側垂直 tab + 右側 pane */
+      .settings-modal-box {
+        max-width: 720px;
+        max-height: 88vh;
+        display: flex;
+        flex-direction: column;
+      }
+      .settings-modal-content {
+        display: flex;
+        flex-direction: row;
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+      }
+      .settings-tabs {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 12px 8px;
+        border-right: 1px solid var(--panel-border);
+        width: 160px;
+        flex-shrink: 0;
+        overflow-y: auto;
+        overflow-x: hidden;
+      }
+      .settings-tabs::-webkit-scrollbar { display: none; }
+      .settings-tab {
+        text-align: left;
+        border: 0;
+        background: transparent;
+        padding: 8px 12px;
+        font-size: 13px;
+        cursor: pointer;
+        color: var(--muted);
+        border-left: 3px solid transparent;
+        border-radius: 0 6px 6px 0;
+        white-space: nowrap;
+        transition: color 120ms, border-color 120ms, background 120ms;
+      }
+      .settings-tab:hover {
+        color: var(--ink);
+        background: var(--subtle);
+      }
+      .settings-tab.active {
+        color: var(--accent);
+        border-left-color: var(--accent);
+        background: var(--accent-soft);
+        font-weight: 500;
+      }
+      .settings-modal-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 16px 20px 24px;
+        min-width: 0;
+      }
+      .settings-modal-body > [data-settings-section] { display: none; }
+      .settings-modal-body > [data-settings-section].active { display: block; }
+      .settings-group { margin-bottom: 0; }
+      .settings-group-hint {
+        font-size: 12px; color: var(--muted);
+        margin-bottom: 10px; line-height: 1.6;
+      }
+      .settings-group-hint code {
+        background: var(--subtle); padding: 1px 5px;
+        border-radius: 4px; font-size: 11px;
+      }
+      .about-row {
+        display: flex; justify-content: space-between;
+        padding: 6px 0; font-size: 13px;
+        border-bottom: 1px solid var(--panel-border);
+      }
+      .about-row:last-child { border-bottom: 0; }
+
+      /* Mobile：垂直 nav 折回頂部水平 strip（即原本的 layout） */
+      @media (max-width: 767px) {
+        .settings-modal-box {
+          max-height: calc(100vh - 32px);
+          max-width: 100%;
+        }
+        .settings-modal-content { flex-direction: column; }
+        .settings-tabs {
+          flex-direction: row;
+          width: auto;
+          border-right: 0;
+          border-bottom: 1px solid var(--panel-border);
+          overflow-x: auto;
+          overflow-y: hidden;
+          padding: 4px 12px 0;
+        }
+        .settings-tab {
+          border-left: 0;
+          border-bottom: 2px solid transparent;
+          border-radius: 0;
+          margin-bottom: -1px;
+        }
+        .settings-tab.active {
+          background: transparent;
+          border-bottom-color: var(--accent);
+          border-left-color: transparent;
+        }
+      }
+
+      /* Per-entry phrase selector (inside entry-issue-row) */
+      .entry-title-row {
+        display: flex; align-items: center;
+        gap: 10px; justify-content: space-between;
+      }
+      .entry-title-text { flex: 1; min-width: 0; }
+      .entry-phrase-select {
+        flex-shrink: 0;
+        width: auto;
+        max-width: 180px;
+        height: 32px;
+        font-size: 12px;
+        padding: 0 8px;
+        border: 1px solid var(--panel-border);
+        border-radius: 6px;
+        background: var(--panel);
+        color: var(--ink);
+        cursor: pointer;
+      }
+      @media (max-width: 767px) {
+        .entry-phrase-select { max-width: 140px; }
+      }
+
+      /* ─── Bottom Tab Bar (mobile only) ───────────────────── */
+      .bottom-tab-bar {
+        display: none;
+        position: fixed;
+        bottom: 0; left: 0; right: 0;
+        background: var(--panel);
+        border-top: 1px solid var(--panel-border);
+        box-shadow: 0 -2px 8px rgba(0,0,0,.08);
+        z-index: 20;
+        padding-bottom: env(safe-area-inset-bottom, 0);
+      }
+      .bottom-tab-bar-inner { display: flex; height: 56px; }
+      .tab-btn {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 3px;
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        font-size: 10px;
+        cursor: pointer;
+        padding: 0;
+        position: relative;
+        transition: color 120ms;
+        min-height: 44px;
+      }
+      .tab-btn.active { color: var(--accent); }
+      .tab-btn .tab-icon { font-size: 20px; line-height: 1; }
+      .tab-badge {
+        position: absolute;
+        top: 6px;
+        right: calc(50% - 22px);
+        min-width: 18px; height: 18px;
+        border-radius: 9px;
+        background: var(--accent);
+        color: white;
+        font-size: 11px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 4px;
+      }
+
+      /* ─── Settings page legacy (kept for class reuse) ───── */
+      .settings-section {
+        border: 1px solid var(--panel-border);
+        border-radius: 10px;
+        overflow: hidden;
+        margin-bottom: 12px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+      }
+      .settings-nav-item {
+        display: flex;
+        align-items: center;
+        width: 100%;
+        padding: 14px 16px;
+        border: 0;
+        background: transparent;
+        color: var(--ink);
+        font-size: 15px;
+        cursor: pointer;
+        gap: 10px;
+        text-align: left;
+        border-bottom: 1px solid var(--panel-border);
+      }
+      .settings-nav-item:last-child { border-bottom: 0; }
+      .settings-nav-item:hover { background: var(--hover-bg); }
+      .settings-nav-label { flex: 1; }
+      .settings-nav-meta { color: var(--muted); font-size: 13px; }
+      .settings-nav-arrow { color: var(--muted); font-size: 16px; }
+      .settings-theme-row {
+        display: flex;
+        align-items: center;
+        padding: 12px 16px;
+        gap: 10px;
+        font-size: 15px;
+      }
+      .settings-theme-label { flex: 1; }
+      .theme-option-group { display: flex; gap: 6px; }
+      .theme-option {
+        padding: 7px 14px;
+        border-radius: 6px;
+        border: 1px solid var(--panel-border);
+        background: transparent;
+        color: var(--muted);
+        font-size: 14px;
+        cursor: pointer;
+        transition: all 120ms;
+      }
+      .theme-option.active { background: var(--accent); color: white; border-color: var(--accent); }
+
+      /* ─── Mobile overrides (<768px) ──────────────────────── */
+      @media (max-width: 767px) {
+        .shell { padding: 12px 12px 72px; }
+        .bottom-tab-bar { display: block; }
+
+        /* Mobile：sidebar 變抽屜，預設收合，shell 全寬顯示 */
+        .app-shell { grid-template-columns: 1fr; }
+        .side-nav {
+          position: fixed;
+          left: 0; top: 0; bottom: 0;
+          width: 240px;
+          z-index: 30;
+          transform: translateX(-100%);
+          box-shadow: 4px 0 16px rgba(0,0,0,.2);
+        }
+        .app-shell.mobile-open .side-nav { transform: translateX(0); }
+        .side-nav-toggle { display: none; }
+
+        /* Panel switching via data-mobile-tab on <body> */
+        [data-mobile-tab="issues"] .details-panel { display: none; }
+
+        [data-mobile-tab="drafts"] .main-toolbar { display: none; }
+        [data-mobile-tab="drafts"] .top-tabs { display: none; }
+        [data-mobile-tab="drafts"] .list-panel { display: none; }
+
+        [data-mobile-tab="schedule"] .main-toolbar { display: none; }
+
+        /* Issue list: no fixed height on mobile */
+        .issue-list { max-height: none; }
+        .source-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+        .source-tabs::-webkit-scrollbar { display: none; }
+        .source-tabs .source-spacer { display: none; }
+
+        /* Sticky actions: fixed above tab bar */
+        .sticky-actions {
+          position: fixed;
+          bottom: 56px;
+          left: 0; right: 0;
+          margin: 0;
+          border-radius: 0;
+          z-index: 15;
+          padding: 8px 12px;
+          justify-content: stretch;
+        }
+        .sticky-actions .ghost-button,
+        .sticky-actions .danger-button,
+        .sticky-actions .action-button { flex: 1; justify-content: center; }
+        #sticky-summary { display: none; }
+
+        /* Table → card view on mobile */
+        .table-wrap {
+          overflow-x: visible;
+          border: 0;
+          border-radius: 0;
+          background: transparent;
+        }
+        table, thead, tr, td, th { display: block; }
+        thead tr { display: none; }
+
+        /* Each entry tbody = card */
+        tbody[data-entry-row] {
+          border: 1px solid var(--panel-border);
+          border-radius: 10px;
+          margin-bottom: 10px;
+          background: var(--panel);
+          box-shadow: var(--shadow);
+          overflow: hidden;
+        }
+        tbody.row-focused { border-color: var(--accent) !important; }
+        tbody.row-focused .entry-issue-row td { background: var(--selected-bg); }
+        tbody.row-focused .entry-fields-row td { background: var(--selected-bg); }
+
+        /* Issue 標題行：全寬，維持 block */
+        .entry-issue-row td {
+          padding: 12px 12px 8px;
+          background: var(--subtle);
+          border-bottom: 1px solid var(--panel-border) !important;
+        }
+        /* Desktop .entry-issue-row override reset */
+        tbody + tbody .entry-issue-row td { border-top: 0; }
+
+        /* 欄位行：grid 排列 */
+        .entry-fields-row {
+          display: grid !important;
+          grid-template-areas:
+            "hours activity"
+            "comments comments"
+            "check check"
+            "send send";
+          grid-template-columns: 1fr 1fr;
+        }
+        .entry-fields-row td:nth-child(1) {
+          grid-area: send;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 8px 12px;
+          border-top: 1px solid var(--panel-border);
+        }
+        .entry-fields-row td:nth-child(2) { grid-area: hours; padding: 8px 6px 6px 12px; }
+        .entry-fields-row td:nth-child(3) { grid-area: activity; padding: 8px 12px 6px 6px; }
+        .entry-fields-row td:nth-child(4) { grid-area: comments; padding: 4px 12px 8px; }
+        .entry-fields-row td:nth-child(5) {
+          grid-area: check;
+          padding: 6px 12px 8px;
+          border-top: 1px dashed var(--panel-border);
+        }
+        td { border-bottom: 0; }
+
+        .mobile-label {
+          display: block;
+          font-size: 11px;
+          letter-spacing: 0.06em;
+          text-transform: uppercase;
+          color: var(--muted);
+          margin-bottom: 4px;
+        }
+        .hours-input { max-width: none; }
+        .col-send, .col-hours, .col-activity, .col-comments, .col-check { width: auto; }
+
+        /* Batch meta stacked on mobile */
+        .batch-meta { flex-direction: column; align-items: stretch; }
+        .date-quick-buttons { width: 100%; }
+        .date-quick-buttons .quick-btn { flex: 1; text-align: center; }
+        .details-panel { padding-bottom: 80px; }
+
+        /* Touch-friendly sizing */
+        .action-button, .ghost-button, .danger-button { min-height: 44px; }
+        .quick-btn { min-height: 40px; }
+        input[type="date"], input[type="number"], input[type="text"], select { min-height: 44px; }
+      }
+
+      /* ─── Desktop (≥768px) ────────────────────────────────── */
+      @media (min-width: 768px) {
+        .layout { grid-template-columns: 1fr 1.2fr; gap: 16px; }
+        .bottom-tab-bar { display: none !important; }
+      }
+    </style>
+  </head>
+  <body data-mobile-tab="issues">
+    <div class="app-shell">
+      <aside class="side-nav" id="side-nav">
+        <div class="side-nav-head">
+          <span class="side-nav-brand">⏱ Worklog</span>
+          <button class="side-nav-toggle" id="side-nav-toggle" title="收合" aria-label="收合側邊欄">‹</button>
+        </div>
+        <nav class="side-nav-body">
+          <button class="side-tab active" data-side-view="worklog">
+            <span class="side-tab-icon">📝</span>
+            <span class="side-tab-label">填寫工時</span>
+          </button>
+          <button class="side-tab" data-side-view="schedule">
+            <span class="side-tab-icon">📅</span>
+            <span class="side-tab-label">兩週排程</span>
+          </button>
+          <button class="side-tab" data-side-view="phrases">
+            <span class="side-tab-icon">✏️</span>
+            <span class="side-tab-label">工時模板</span>
+          </button>
+          <button class="side-tab" data-side-view="sources">
+            <span class="side-tab-icon">🔍</span>
+            <span class="side-tab-label">PJ 篩選器</span>
+          </button>
+          <button class="side-tab" data-side-view="issue-batch">
+            <span class="side-tab-icon">➕</span>
+            <span class="side-tab-label">批次建 issue</span>
+          </button>
+        </nav>
+        <div class="side-nav-foot">
+          <button class="side-tab" id="settings-button" title="設定">
+            <span class="side-tab-icon">⚙️</span>
+            <span class="side-tab-label">設定</span>
+          </button>
+        </div>
+      </aside>
+    <div class="shell">
+      <section class="panel main-toolbar" id="main-toolbar">
+        <div class="source-tabs" id="source-tabs"></div>
+      </section>
+
+      <div class="main-view" data-view="worklog">
+      <section class="layout">
+        <article class="panel list-panel">
+          <div class="workbench-header">
+            <div>
+              <span class="section-title">
+                Issue List <span class="count-badge" id="issue-count">-</span>
+              </span>
+              <div class="muted" id="issue-summary">尚未載入</div>
+            </div>
+            <div class="muted">已選 <span id="selected-count">0 筆</span></div>
+          </div>
+          <div class="list-toolbar">
+            <input id="filter-search" type="text" placeholder="🔍 搜尋標題..." class="filter-search-input">
+            <div class="toolbar-actions">
+              <button class="ghost-button" id="select-all-button">全選</button>
+              <button class="ghost-button" id="clear-selection-button">清空勾選</button>
+              <button class="action-button" id="refresh-button">重新整理</button>
+            </div>
+          </div>
+          <div class="date-filter-row">
+            <span class="date-filter-label" id="date-filter-label">更新日期</span>
+            <div class="date-filter-buttons">
+              <button class="quick-btn active" data-day-filter="">全部</button>
+              <button class="quick-btn" data-day-filter="0">今天</button>
+              <button class="quick-btn" data-day-filter="1">昨天</button>
+              <button class="quick-btn" data-day-filter="2">前天</button>
+            </div>
+            <input id="filter-date" type="date" class="date-filter-pick" title="自選日期">
+          </div>
+          <ul class="issue-list" id="issue-list"></ul>
+        </article>
+
+        <aside class="panel details-panel">
+          <div class="workbench-header">
+            <div>
+              <span class="section-title">工時填寫</span>
+              <div class="muted" id="workbench-summary">先從左側勾選要補登工時的 issue。</div>
+            </div>
+          </div>
+          <div class="batch-meta">
+            <label class="field-stack">
+              <span id="batch-spent-on-label">工時日期</span>
+              <input id="batch-spent-on" type="date">
+            </label>
+            <div class="date-quick-buttons" id="date-quick-buttons">
+              <button class="quick-btn" data-spent-on-offset="1">昨天</button>
+              <button class="quick-btn" data-spent-on-offset="2">前天</button>
+              <button class="quick-btn" data-spent-on-offset="3">三天前</button>
+            </div>
+            <div class="daily-total-badge" id="daily-total-badge" title="已勾選送出的時數加總">0 / 6.5 h</div>
+          </div>
+          <div class="alert-stack" id="alert-stack"></div>
+          <div class="table-wrap" id="table-wrap"></div>
+          <div class="sticky-actions" id="sticky-actions">
+            <span class="muted" id="sticky-summary">至少填入一筆工時後即可送出。</span>
+            <button class="action-button" id="commit-button">送出工時</button>
+          </div>
+          <div class="sticky-actions" id="sticky-actions-schedule" style="display:none;">
+            <span class="muted">送出會用目前的甘特分配，更新每筆 issue 的起迄日期</span>
+            <button class="action-button" id="schedule-apply-button">送出更新起迄日 →</button>
+          </div>
+        </aside>
+      </section>
+      </div><!-- /main-view worklog -->
+
+      <!-- 兩週排程使用相同 layout，但 source-tabs 隱藏。重複一個 wrapper 不必，
+           讓 schedule 共用 worklog view 容器即可（renderTopTabs 會切換 main-toolbar 顯示） -->
+
+      <div class="main-view" data-view="phrases" hidden>
+        <article class="panel main-card-view">
+          <div class="view-head">
+            <h2 class="view-title">✏️ 工時模板</h2>
+            <p class="muted">每筆工時卡片右上角的「快速填入」可一鍵套用模板。內容存在瀏覽器 GM 儲存。</p>
+          </div>
+          <div class="add-form">
+            <label class="field-stack">
+              <span>標籤 (選填)</span>
+              <input type="text" id="phrase-label-input" placeholder="例：日常維運">
+            </label>
+            <div class="phrase-field-grid">
+              <label class="field-stack compact">
+                <span>預設時數 (選填)</span>
+                <input type="number" step="0.1" min="0.1" id="phrase-hours-input">
+              </label>
+              <label class="field-stack compact">
+                <span>預設活動 (選填)</span>
+                <span id="phrase-activity-wrap"></span>
+              </label>
+            </div>
+            <label class="field-stack">
+              <span>預設備註 (選填)</span>
+              <textarea id="phrase-comments-input"></textarea>
+            </label>
+            <div>
+              <button class="action-button" id="phrase-add-button">儲存模板</button>
+              <button class="ghost-button" id="phrase-cancel-button" style="display:none;">取消編輯</button>
+            </div>
+          </div>
+          <div class="drawer-list" id="phrases-list"></div>
+        </article>
+      </div><!-- /main-view phrases -->
+
+      <div class="main-view" data-view="sources" hidden>
+        <article class="panel main-card-view">
+          <div class="view-head">
+            <h2 class="view-title">🔍 PJ 篩選器</h2>
+            <p class="muted">把你在 Redmine 建好的自訂查詢（Custom Query）加入這裡作為「填寫工時」分頁。從 Redmine 網址列抓 <code>?query_id=X</code> 與顯示名稱貼進來即可。</p>
+          </div>
+          <div class="add-form">
+            <label class="field-stack">
+              <span>顯示名稱</span>
+              <input type="text" id="query-name-input" placeholder="例：我的任務分組">
+            </label>
+            <label class="field-stack">
+              <span>Query ID</span>
+              <input type="number" min="1" id="query-id-input" placeholder="例：762">
+            </label>
+            <div>
+              <button class="action-button" id="query-add-button">新增 PJ 篩選器</button>
+            </div>
+          </div>
+          <div class="drawer-list" id="saved-queries-list"></div>
+        </article>
+      </div><!-- /main-view sources -->
+
+      <div class="main-view" data-view="issue-batch" hidden>
+        <article class="panel batch-create-panel">
+          <div class="view-head">
+            <h2 class="view-title">批次建 issue</h2>
+            <p class="muted">選一個專案 + 整批 tracker，從模板套用或手動新增列，一鍵建立多筆 issue。指派人預設為自己。</p>
+          </div>
+
+          <section class="batch-section">
+            <div class="batch-issue-meta">
+              <label class="field-stack">
+                <span>Project</span>
+                <input type="text" id="batch-project-input" list="batch-projects-datalist" placeholder="搜尋專案名稱…" autocomplete="off">
+                <datalist id="batch-projects-datalist"></datalist>
+                <span class="muted batch-project-hint" id="batch-project-hint"></span>
+              </label>
+              <label class="field-stack">
+                <span>Tracker（整批套用）</span>
+                <select id="batch-tracker-select"></select>
+              </label>
+            </div>
+          </section>
+
+          <section class="batch-section">
+            <div class="batch-section-header">
+              <h3 class="section-subtitle">Issue 模板</h3>
+              <span class="muted">勾選即加入下方表格；取消勾選即移除；點 ✎ 編輯、🗑 刪除</span>
+            </div>
+            <div id="batch-templates-picker" class="batch-templates-picker-list"></div>
+            <div class="batch-edit-banner" id="batch-edit-banner" hidden>
+              <span>編輯中：<strong id="batch-edit-banner-subject"></strong></span>
+              <button type="button" class="ghost-button" id="batch-edit-banner-cancel">取消編輯</button>
+            </div>
+            <div class="batch-template-add">
+              <input type="text" id="issue-template-subject-input" placeholder="新增 / 編輯 subject（例：[SD]SD分析）">
+              <button class="action-button" id="issue-template-add-button">儲存模板</button>
+              <button class="ghost-button" id="issue-template-cancel-button" style="display:none;">取消</button>
+            </div>
+          </section>
+
+          <section class="batch-section">
+            <div class="batch-row-actions">
+              <button class="ghost-button" id="batch-add-blank-row-button">新增空白列</button>
+              <button class="ghost-button" id="batch-clear-rows-button">全部清空</button>
+            </div>
+            <div class="table-wrap">
+              <table class="batch-rows-table" id="batch-rows-table">
+                <thead>
+                  <tr>
+                    <th class="col-subject">Subject</th>
+                    <th class="col-hours">估計工時</th>
+                    <th class="col-date">開始日期</th>
+                    <th class="col-date">完成日期</th>
+                    <th class="col-remove"></th>
+                  </tr>
+                </thead>
+                <tbody id="batch-rows-tbody"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <div class="alert-stack" id="batch-alert-stack"></div>
+
+          <div class="sticky-actions">
+            <span class="muted" id="batch-summary">尚未加入任何列。</span>
+            <button class="action-button" id="batch-create-button">建立</button>
+          </div>
+
+          <div class="drawer-list" id="batch-results-list"></div>
+        </article>
+      </div><!-- /main-view issue-batch -->
+    </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal-overlay" hidden aria-hidden="true">
+      <div class="modal-box settings-modal-box" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+        <div class="modal-header">
+          <h3 id="settings-modal-title">設定</h3>
+          <button class="modal-x" id="settings-modal-close" aria-label="關閉">&times;</button>
+        </div>
+        <div class="settings-modal-content">
+          <div class="settings-tabs" role="tablist" aria-orientation="vertical">
+            <button class="settings-tab active" data-settings-tab="appearance" role="tab">外觀</button>
+            <button class="settings-tab" data-settings-tab="about" role="tab">關於</button>
+          </div>
+          <div class="modal-body settings-modal-body">
+
+            <section class="settings-group active" data-settings-section="appearance">
+              <div class="theme-option-group">
+                <button class="theme-option" data-theme-value="light">淺色</button>
+                <button class="theme-option" data-theme-value="dark">深色</button>
+              </div>
+            </section>
+
+            <section class="settings-group" data-settings-section="about">
+              <div class="about-row"><span class="muted">版本</span><span id="app-version">-</span></div>
+              <div class="about-row"><span class="muted">更新</span><span id="app-build-time">-</span></div>
+            </section>
+
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="loading-mask" id="loading-mask" aria-hidden="true">
+      <div class="loading-card">
+        <div class="spinner" aria-hidden="true"></div>
+        <strong id="loading-message">載入中...</strong>
+      </div>
+    </div>
+
+    <nav class="bottom-tab-bar" id="mobile-nav" aria-label="主導覽">
+      <div class="bottom-tab-bar-inner">
+        <button class="tab-btn active" data-tab="issues" aria-label="Issue 清單">
+          <span class="tab-icon" aria-hidden="true">📋</span>
+          <span>Issue</span>
+        </button>
+        <button class="tab-btn" data-tab="drafts" aria-label="工時草稿">
+          <span class="tab-icon" aria-hidden="true">✏️</span>
+          <span>待送出</span>
+          <span class="tab-badge" id="draft-badge" style="display:none;" aria-live="polite">0</span>
+        </button>
+        <button class="tab-btn" data-tab="schedule" aria-label="排程分配">
+          <span class="tab-icon" aria-hidden="true">📅</span>
+          <span>排程</span>
+        </button>
+        <button class="tab-btn" data-tab="settings" aria-label="設定">
+          <span class="tab-icon" aria-hidden="true">⚙️</span>
+          <span>設定</span>
+        </button>
+      </div>
+    </nav>
+
+    <!-- Commit Confirmation Modal -->
+    <div id="commit-modal" class="modal-overlay" hidden aria-hidden="true">
+      <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="commit-modal-title">
+        <div class="modal-header">
+          <h3 id="commit-modal-title">確認送出工時</h3>
+          <button class="modal-x" id="commit-modal-close" aria-label="關閉">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="modal-date-row">
+            <label class="modal-date-label" for="commit-modal-date">工時日期</label>
+            <input type="date" id="commit-modal-date" class="input">
+          </div>
+          <div class="modal-quick-dates">
+            <button data-modal-offset="0">今天</button>
+            <button data-modal-offset="1">昨天</button>
+            <button data-modal-offset="2">前天</button>
+          </div>
+          <div id="commit-modal-date-warn" class="modal-date-warn" hidden></div>
+          <p id="commit-modal-summary" class="modal-summary"></p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="commit-modal-cancel">取消</button>
+          <button class="btn btn-primary" id="commit-modal-confirm">確認送出</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/worklog-app.js"></script>
+  </body>
+</html>

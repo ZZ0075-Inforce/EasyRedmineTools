@@ -1,0 +1,53 @@
+資訊清單
+Easy Redmine ER 2019 (Platform: 07.07)
+
+Easy Redmine:
+  Brand version                  ER 2019
+  Platform version               07.07
+  Build version                  (build not detected)
+  Full version                   ER 2019 (Platform: 07.07)
+Environment:
+  Redmine version                4.0.3.stable
+  Ruby version                   2.5.0-p0 (2017-12-25) [x86_64-linux]
+  Rails version                  5.2.2.1
+  Environment                    production
+  Database adapter               Mysql2
+  Mailer queue                   ActiveJob::QueueAdapters::AsyncAdapter
+  Mailer delivery                smtp
+SCM:
+  Filesystem                     
+Redmine plugins:
+  before_render                  
+  ckeditor                       
+  clipboard_image_paste          1.9
+  sanitize                       
+  easy_extensions                2019
+  easy_attendances               2019
+  easy_budgetsheet               2019
+  easy_buttons                   2019
+  easy_calculation               2019
+  easy_calendar                  2019
+  easy_custom_field_permissions  2019
+  easy_data_templates            2019
+  easy_money                     2019
+  easy_printable_templates       2019
+  easy_project_attachments       2019
+  easy_quick_project_planner     2019
+  easy_redmine                   
+  easy_theme_designer            2019
+  easy_to_do_list                2019
+  easy_xml_helper                2019
+  easy_baseline                  1.3
+  easy_checklist                 2019
+  easy_gantt                     1.9
+  easy_gantt_pro                 1.9
+  easy_gantt_resources           1.6
+  easy_instant_messages          2016
+  easy_job                       1.1
+  easy_resource_base             1.0
+  easy_resource_dashboard        1.0.beta
+  easy_zoom                      2019
+Server:
+  Current datetime               2026-03-20 15:16:52 +0800
+  Server datetime                2026-03-20 15:16:52 +0800
+  Database encoding              utf8 / utf8_general_ci
