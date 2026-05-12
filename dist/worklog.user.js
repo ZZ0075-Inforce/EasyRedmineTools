@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605121745
+// @version      1.0.202605121859
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -2549,8 +2549,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605121745";
-const APP_BUILD_TIME = "2026-05-12 17:45";
+const APP_VERSION = "1.0.202605121859";
+const APP_BUILD_TIME = "2026-05-12 18:59";
 
 const state = {
   localToday: localDateString(new Date()),
@@ -2958,11 +2958,20 @@ function buildIssuesUrl() {
 }
 
 async function fetchIssues() {
+  const start = performance.now();
   const data = await fetchJson(buildIssuesUrl());
   state.issues = data.issues || [];
   state.issueWarnings = data.warnings || [];
   if (!state.batchSpentOn) {
     state.batchSpentOn = daysAgoString(1);
+  }
+  // visited 純讀 GM 通常 <5ms，loading mask 還沒淡入就被關掉，使用者看不到刷新動畫。
+  // 保證最小 300ms 可見時間，讓 spinner 至少完整跑一輪。
+  if (state.currentSource.type === "visited") {
+    const elapsed = performance.now() - start;
+    if (elapsed < 300) {
+      await new Promise((r) => setTimeout(r, 300 - elapsed));
+    }
   }
 }
 

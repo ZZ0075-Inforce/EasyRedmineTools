@@ -415,11 +415,20 @@ function buildIssuesUrl() {
 }
 
 async function fetchIssues() {
+  const start = performance.now();
   const data = await fetchJson(buildIssuesUrl());
   state.issues = data.issues || [];
   state.issueWarnings = data.warnings || [];
   if (!state.batchSpentOn) {
     state.batchSpentOn = daysAgoString(1);
+  }
+  // visited 純讀 GM 通常 <5ms，loading mask 還沒淡入就被關掉，使用者看不到刷新動畫。
+  // 保證最小 300ms 可見時間，讓 spinner 至少完整跑一輪。
+  if (state.currentSource.type === "visited") {
+    const elapsed = performance.now() - start;
+    if (elapsed < 300) {
+      await new Promise((r) => setTimeout(r, 300 - elapsed));
+    }
   }
 }
 
