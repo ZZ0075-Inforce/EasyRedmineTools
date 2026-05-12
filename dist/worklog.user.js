@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605121511
+// @version      1.0.202605121745
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -2508,6 +2508,18 @@ function injectTopMenu() {
     if (children) children.style.display = "none";
   }
 
+  // 點選單外部 / 按 ESC 自動關閉子選單
+  document.addEventListener("click", (e) => {
+    if (children.style.display === "none") return;
+    if (li.contains(e.target)) return;
+    closeMenuChildren();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && children.style.display !== "none") {
+      closeMenuChildren();
+    }
+  });
+
   return true;
 }
 
@@ -2537,8 +2549,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605121511";
-const APP_BUILD_TIME = "2026-05-12 15:11";
+const APP_VERSION = "1.0.202605121745";
+const APP_BUILD_TIME = "2026-05-12 17:45";
 
 const state = {
   localToday: localDateString(new Date()),

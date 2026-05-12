@@ -72,6 +72,18 @@ function injectTopMenu() {
     if (children) children.style.display = "none";
   }
 
+  // 點選單外部 / 按 ESC 自動關閉子選單
+  document.addEventListener("click", (e) => {
+    if (children.style.display === "none") return;
+    if (li.contains(e.target)) return;
+    closeMenuChildren();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && children.style.display !== "none") {
+      closeMenuChildren();
+    }
+  });
+
   return true;
 }
 
