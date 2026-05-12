@@ -1,30 +1,9 @@
-/* ===== Floating launcher + overlay mount =================================== */
+/* ===== Overlay mount ======================================================= */
 const OVERLAY_ROOT_ID = "__worklog_root";
-const LAUNCHER_ID = "__worklog_launcher";
 const BACKDROP_ID = "__worklog_backdrop";
 const CLOSE_BTN_ID = "__worklog_close";
 
 const LAUNCHER_CSS = `
-#${LAUNCHER_ID} {
-  position: fixed !important;
-  right: 20px;
-  bottom: 20px;
-  z-index: 2147483645 !important;
-  width: 52px; height: 52px;
-  border-radius: 50%; border: 0;
-  background: #d13a3a; color: #fff;
-  font-size: 22px;
-  box-shadow: 0 4px 12px rgba(0,0,0,.25);
-  cursor: grab; line-height: 1;
-  display: inline-flex; align-items: center; justify-content: center;
-  transition: transform 150ms ease-out, box-shadow 150ms ease-out;
-  font-family: "PingFang TC", "Microsoft JhengHei", sans-serif;
-  user-select: none;
-  touch-action: none;
-}
-#${LAUNCHER_ID}:hover { transform: scale(1.05); box-shadow: 0 6px 16px rgba(0,0,0,.3); }
-#${LAUNCHER_ID}:active, #${LAUNCHER_ID}.is-dragging { cursor: grabbing; transform: scale(0.96); }
-
 #${BACKDROP_ID} {
   position: fixed !important;
   inset: 0 !important;
@@ -69,10 +48,6 @@ const LAUNCHER_CSS = `
   margin: 0 !important;
   width: auto !important;
   z-index: 5;
-}
-#${OVERLAY_ROOT_ID} .bottom-tab-bar {
-  position: sticky !important;
-  bottom: 0 !important;
 }
 /* details-panel 在 master 為應對 mobile 底部 tab bar 加了 80px padding，
    但 overlay 模式下 sticky-actions 已 sticky 到 overlay 底，不需要這麼大留白 */
@@ -145,91 +120,6 @@ let __overlayRoot = null;
 let __backdrop = null;
 let __closeBtn = null;
 
-function installLauncher() {
-  if (document.getElementById(LAUNCHER_ID)) return;
-  addCss(LAUNCHER_CSS);
-  const btn = document.createElement("button");
-  btn.id = LAUNCHER_ID;
-  btn.type = "button";
-  btn.title = "LawPJ 工時助手（可拖移）";
-  btn.setAttribute("aria-label", "開啟工時助手");
-  btn.textContent = "⏱";
-
-  // 還原上次拖移位置
-  const saved = Store.get("launcher_pos", null);
-  if (saved && saved.left && saved.top) {
-    btn.style.left = saved.left;
-    btn.style.top = saved.top;
-    btn.style.right = "auto";
-    btn.style.bottom = "auto";
-  }
-
-  attachLauncherDrag(btn);
-  document.body.appendChild(btn);
-}
-
-function attachLauncherDrag(btn) {
-  let drag = null;
-  const THRESHOLD = 4;
-
-  btn.addEventListener("pointerdown", (e) => {
-    if (e.button !== undefined && e.button !== 0) return;
-    const rect = btn.getBoundingClientRect();
-    drag = {
-      sx: e.clientX, sy: e.clientY,
-      ox: e.clientX - rect.left, oy: e.clientY - rect.top,
-      moved: false,
-    };
-    try { btn.setPointerCapture(e.pointerId); } catch {}
-    btn.classList.add("is-dragging");
-  });
-
-  btn.addEventListener("pointermove", (e) => {
-    if (!drag) return;
-    const dx = Math.abs(e.clientX - drag.sx);
-    const dy = Math.abs(e.clientY - drag.sy);
-    if (!drag.moved && (dx > THRESHOLD || dy > THRESHOLD)) drag.moved = true;
-    if (!drag.moved) return;
-    const w = btn.offsetWidth, h = btn.offsetHeight;
-    let x = e.clientX - drag.ox;
-    let y = e.clientY - drag.oy;
-    x = Math.max(0, Math.min(window.innerWidth - w, x));
-    y = Math.max(0, Math.min(window.innerHeight - h, y));
-    btn.style.left = x + "px";
-    btn.style.top = y + "px";
-    btn.style.right = "auto";
-    btn.style.bottom = "auto";
-  });
-
-  function endDrag(e) {
-    if (!drag) return;
-    btn.classList.remove("is-dragging");
-    try { btn.releasePointerCapture(e.pointerId); } catch {}
-    const moved = drag.moved;
-    drag = null;
-    if (moved) {
-      Store.set("launcher_pos", {
-        left: btn.style.left || "",
-        top: btn.style.top || "",
-      });
-      // 抑制隨後的 click 事件
-      btn.__suppressClick = true;
-      setTimeout(() => { btn.__suppressClick = false; }, 50);
-    }
-  }
-  btn.addEventListener("pointerup", endDrag);
-  btn.addEventListener("pointercancel", endDrag);
-
-  btn.addEventListener("click", (e) => {
-    if (btn.__suppressClick) {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      return;
-    }
-    toggleOverlay();
-  });
-}
-
 function addCss(text) {
   if (typeof GM_addStyle !== "undefined") { GM_addStyle(text); return; }
   const style = document.createElement("style");
@@ -243,9 +133,8 @@ function mountOverlay() {
     return;
   }
 
-  // LAUNCHER_CSS 含 #__worklog_root 的 fixed 定位 + backdrop + close 按鈕樣式。
-  // 移除 installLauncher() 呼叫後，這些規則必須在 mountOverlay 注入，否則
-  // overlay 沒拿到 position: fixed 會掉到 body 末端（normal flow）。
+  // LAUNCHER_CSS 含 #__worklog_root 的 fixed 定位 + backdrop + close 按鈕樣式，
+  // 必須在 mountOverlay 注入，否則 overlay 沒拿到 position: fixed 會掉到 body 末端。
   addCss(LAUNCHER_CSS);
   addCss(APP_CSS);
 
@@ -258,7 +147,6 @@ function mountOverlay() {
   // Overlay root
   __overlayRoot = document.createElement("div");
   __overlayRoot.id = OVERLAY_ROOT_ID;
-  __overlayRoot.setAttribute("data-mobile-tab", "issues");
   __overlayRoot.innerHTML = APP_HTML;
   document.body.appendChild(__overlayRoot);
 

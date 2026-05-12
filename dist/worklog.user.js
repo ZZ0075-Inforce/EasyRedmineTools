@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202604300226
+// @version      1.0.202605121511
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -294,28 +294,6 @@ const APP_HTML = `<div class="pj-app-shell">
         <strong id="loading-message">載入中...</strong>
       </div>
     </div>
-
-    <nav class="pj-bottom-tab-bar" id="mobile-nav" aria-label="主導覽">
-      <div class="pj-bottom-tab-bar-inner">
-        <button class="pj-tab-btn active" data-tab="issues" aria-label="Issue 清單">
-          <span class="pj-tab-icon" aria-hidden="true">📋</span>
-          <span>Issue</span>
-        </button>
-        <button class="pj-tab-btn" data-tab="drafts" aria-label="工時草稿">
-          <span class="pj-tab-icon" aria-hidden="true">✏️</span>
-          <span>待送出</span>
-          <span class="pj-tab-badge" id="draft-badge" style="display:none;" aria-live="polite">0</span>
-        </button>
-        <button class="pj-tab-btn" data-tab="schedule" aria-label="排程分配">
-          <span class="pj-tab-icon" aria-hidden="true">📅</span>
-          <span>排程</span>
-        </button>
-        <button class="pj-tab-btn" data-tab="settings" aria-label="設定">
-          <span class="pj-tab-icon" aria-hidden="true">⚙️</span>
-          <span>設定</span>
-        </button>
-      </div>
-    </nav>
 
     <!-- Commit Confirmation Modal -->
     <div id="commit-modal" class="pj-modal-overlay" hidden aria-hidden="true">
@@ -750,16 +728,7 @@ const APP_CSS = `#__worklog_root {
         text-transform: uppercase;
         color: var(--muted);
         margin-right: 4px;
-      }#__worklog_root .pj-filter-advanced {
-        display: none;
-        gap: 10px;
-        flex-wrap: wrap;
-        padding: 12px 14px;
-        border-radius: 10px;
-        background: var(--subtle);
-        border: 1px solid var(--panel-border);
-        margin-bottom: 12px;
-      }#__worklog_root .pj-filter-advanced.open { display: flex; }#__worklog_root .pj-quick-btn {
+      }#__worklog_root .pj-quick-btn {
         padding: 8px 12px;
         border-radius: 6px;
         border: 1px solid var(--panel-border);
@@ -1289,45 +1258,6 @@ const APP_CSS = `#__worklog_root {
         color: var(--ink);
         cursor: pointer;
       }@media (max-width: 767px) {#__worklog_root .pj-entry-phrase-select { max-width: 140px; }
-      }#__worklog_root .pj-bottom-tab-bar {
-        display: none;
-        position: fixed;
-        bottom: 0; left: 0; right: 0;
-        background: var(--panel);
-        border-top: 1px solid var(--panel-border);
-        box-shadow: 0 -2px 8px rgba(0,0,0,.08);
-        z-index: 20;
-        padding-bottom: env(safe-area-inset-bottom, 0);
-      }#__worklog_root .pj-bottom-tab-bar-inner { display: flex; height: 56px; }#__worklog_root .pj-tab-btn {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 3px;
-        border: 0;
-        background: transparent;
-        color: var(--muted);
-        font-size: 10px;
-        cursor: pointer;
-        padding: 0;
-        position: relative;
-        transition: color 120ms;
-        min-height: 44px;
-      }#__worklog_root .pj-tab-btn.active { color: var(--accent); }#__worklog_root .pj-tab-btn .pj-tab-icon { font-size: 20px; line-height: 1; }#__worklog_root .pj-tab-badge {
-        position: absolute;
-        top: 6px;
-        right: calc(50% - 22px);
-        min-width: 18px; height: 18px;
-        border-radius: 9px;
-        background: var(--accent);
-        color: white;
-        font-size: 11px;
-        font-weight: 600;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 0 4px;
       }#__worklog_root .pj-settings-section {
         border: 1px solid var(--panel-border);
         border-radius: 10px;
@@ -1363,16 +1293,16 @@ const APP_CSS = `#__worklog_root {
         font-size: 14px;
         cursor: pointer;
         transition: all 120ms;
-      }#__worklog_root .pj-theme-option.active { background: var(--accent); color: white; border-color: var(--accent); }@media (max-width: 767px) {#__worklog_root .shell { padding: 12px 12px 72px; }#__worklog_root .pj-bottom-tab-bar { display: block; }#__worklog_root .pj-app-shell { grid-template-columns: 1fr; }#__worklog_root .pj-side-nav {
+      }#__worklog_root .pj-theme-option.active { background: var(--accent); color: white; border-color: var(--accent); }@media (max-width: 767px) {#__worklog_root .shell { padding: 12px; }#__worklog_root .pj-app-shell { grid-template-columns: 1fr; }#__worklog_root .pj-side-nav {
           position: fixed;
           left: 0; top: 0; bottom: 0;
           width: 240px;
           z-index: 30;
           transform: translateX(-100%);
           box-shadow: 4px 0 16px rgba(0,0,0,.2);
-        }#__worklog_root .pj-app-shell.pj-mobile-open .pj-side-nav { transform: translateX(0); }#__worklog_root .pj-side-nav-toggle { display: none; }#__worklog_root[data-mobile-tab="issues"] .pj-details-panel { display: none; }#__worklog_root[data-mobile-tab="drafts"] .pj-main-toolbar { display: none; }#__worklog_root[data-mobile-tab="drafts"] .pj-top-tabs { display: none; }#__worklog_root[data-mobile-tab="drafts"] .pj-list-panel { display: none; }#__worklog_root[data-mobile-tab="schedule"] .pj-main-toolbar { display: none; }#__worklog_root .pj-issue-list { max-height: none; }#__worklog_root .pj-source-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }#__worklog_root .pj-source-tabs::-webkit-scrollbar { display: none; }#__worklog_root .pj-source-tabs .pj-source-spacer { display: none; }#__worklog_root .pj-sticky-actions {
+        }#__worklog_root .pj-app-shell.pj-mobile-open .pj-side-nav { transform: translateX(0); }#__worklog_root .pj-side-nav-toggle { display: none; }#__worklog_root .pj-issue-list { max-height: none; }#__worklog_root .pj-source-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }#__worklog_root .pj-source-tabs::-webkit-scrollbar { display: none; }#__worklog_root .pj-source-tabs .pj-source-spacer { display: none; }#__worklog_root .pj-sticky-actions {
           position: fixed;
-          bottom: 56px;
+          bottom: 0;
           left: 0; right: 0;
           margin: 0;
           border-radius: 0;
@@ -1422,7 +1352,7 @@ const APP_CSS = `#__worklog_root {
           color: var(--muted);
           margin-bottom: 4px;
         }#__worklog_root .pj-hours-input { max-width: none; }#__worklog_root .pj-col-send, #__worklog_root .pj-col-hours, #__worklog_root .pj-col-activity, #__worklog_root .pj-col-comments, #__worklog_root .pj-col-check { width: auto; }#__worklog_root .pj-batch-meta { flex-direction: column; align-items: stretch; }#__worklog_root .pj-date-quick-buttons { width: 100%; }#__worklog_root .pj-date-quick-buttons .pj-quick-btn { flex: 1; text-align: center; }#__worklog_root .pj-details-panel { padding-bottom: 80px; }#__worklog_root .pj-action-button, #__worklog_root .pj-ghost-button, #__worklog_root .pj-danger-button { min-height: 44px; }#__worklog_root .pj-quick-btn { min-height: 40px; }#__worklog_root input[type="date"], #__worklog_root input[type="number"], #__worklog_root input[type="text"], #__worklog_root select { min-height: 44px; }
-      }@media (min-width: 768px) {#__worklog_root .layout { grid-template-columns: 1fr 1.2fr; gap: 16px; }#__worklog_root .pj-bottom-tab-bar { display: none !important; }
+      }@media (min-width: 768px) {#__worklog_root .layout { grid-template-columns: 1fr 1.2fr; gap: 16px; }
       }`;
 
 /* ===== Storage layer (GM 或 localStorage fallback) ========================= */
@@ -2299,33 +2229,12 @@ function applySettingsPatches(root) {
 }
 
 
-/* ===== Floating launcher + overlay mount =================================== */
+/* ===== Overlay mount ======================================================= */
 const OVERLAY_ROOT_ID = "__worklog_root";
-const LAUNCHER_ID = "__worklog_launcher";
 const BACKDROP_ID = "__worklog_backdrop";
 const CLOSE_BTN_ID = "__worklog_close";
 
 const LAUNCHER_CSS = `
-#${LAUNCHER_ID} {
-  position: fixed !important;
-  right: 20px;
-  bottom: 20px;
-  z-index: 2147483645 !important;
-  width: 52px; height: 52px;
-  border-radius: 50%; border: 0;
-  background: #d13a3a; color: #fff;
-  font-size: 22px;
-  box-shadow: 0 4px 12px rgba(0,0,0,.25);
-  cursor: grab; line-height: 1;
-  display: inline-flex; align-items: center; justify-content: center;
-  transition: transform 150ms ease-out, box-shadow 150ms ease-out;
-  font-family: "PingFang TC", "Microsoft JhengHei", sans-serif;
-  user-select: none;
-  touch-action: none;
-}
-#${LAUNCHER_ID}:hover { transform: scale(1.05); box-shadow: 0 6px 16px rgba(0,0,0,.3); }
-#${LAUNCHER_ID}:active, #${LAUNCHER_ID}.is-dragging { cursor: grabbing; transform: scale(0.96); }
-
 #${BACKDROP_ID} {
   position: fixed !important;
   inset: 0 !important;
@@ -2370,10 +2279,6 @@ const LAUNCHER_CSS = `
   margin: 0 !important;
   width: auto !important;
   z-index: 5;
-}
-#${OVERLAY_ROOT_ID} .pj-bottom-tab-bar {
-  position: sticky !important;
-  bottom: 0 !important;
 }
 /* pj-details-panel 在 master 為應對 mobile 底部 tab bar 加了 80px padding，
    但 overlay 模式下 pj-sticky-actions 已 sticky 到 overlay 底，不需要這麼大留白 */
@@ -2446,91 +2351,6 @@ let __overlayRoot = null;
 let __backdrop = null;
 let __closeBtn = null;
 
-function installLauncher() {
-  if (document.getElementById(LAUNCHER_ID)) return;
-  addCss(LAUNCHER_CSS);
-  const btn = document.createElement("button");
-  btn.id = LAUNCHER_ID;
-  btn.type = "button";
-  btn.title = "LawPJ 工時助手（可拖移）";
-  btn.setAttribute("aria-label", "開啟工時助手");
-  btn.textContent = "⏱";
-
-  // 還原上次拖移位置
-  const saved = Store.get("launcher_pos", null);
-  if (saved && saved.left && saved.top) {
-    btn.style.left = saved.left;
-    btn.style.top = saved.top;
-    btn.style.right = "auto";
-    btn.style.bottom = "auto";
-  }
-
-  attachLauncherDrag(btn);
-  document.body.appendChild(btn);
-}
-
-function attachLauncherDrag(btn) {
-  let drag = null;
-  const THRESHOLD = 4;
-
-  btn.addEventListener("pointerdown", (e) => {
-    if (e.button !== undefined && e.button !== 0) return;
-    const rect = btn.getBoundingClientRect();
-    drag = {
-      sx: e.clientX, sy: e.clientY,
-      ox: e.clientX - rect.left, oy: e.clientY - rect.top,
-      moved: false,
-    };
-    try { btn.setPointerCapture(e.pointerId); } catch {}
-    btn.classList.add("is-dragging");
-  });
-
-  btn.addEventListener("pointermove", (e) => {
-    if (!drag) return;
-    const dx = Math.abs(e.clientX - drag.sx);
-    const dy = Math.abs(e.clientY - drag.sy);
-    if (!drag.moved && (dx > THRESHOLD || dy > THRESHOLD)) drag.moved = true;
-    if (!drag.moved) return;
-    const w = btn.offsetWidth, h = btn.offsetHeight;
-    let x = e.clientX - drag.ox;
-    let y = e.clientY - drag.oy;
-    x = Math.max(0, Math.min(window.innerWidth - w, x));
-    y = Math.max(0, Math.min(window.innerHeight - h, y));
-    btn.style.left = x + "px";
-    btn.style.top = y + "px";
-    btn.style.right = "auto";
-    btn.style.bottom = "auto";
-  });
-
-  function endDrag(e) {
-    if (!drag) return;
-    btn.classList.remove("is-dragging");
-    try { btn.releasePointerCapture(e.pointerId); } catch {}
-    const moved = drag.moved;
-    drag = null;
-    if (moved) {
-      Store.set("launcher_pos", {
-        left: btn.style.left || "",
-        top: btn.style.top || "",
-      });
-      // 抑制隨後的 click 事件
-      btn.__suppressClick = true;
-      setTimeout(() => { btn.__suppressClick = false; }, 50);
-    }
-  }
-  btn.addEventListener("pointerup", endDrag);
-  btn.addEventListener("pointercancel", endDrag);
-
-  btn.addEventListener("click", (e) => {
-    if (btn.__suppressClick) {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      return;
-    }
-    toggleOverlay();
-  });
-}
-
 function addCss(text) {
   if (typeof GM_addStyle !== "undefined") { GM_addStyle(text); return; }
   const style = document.createElement("style");
@@ -2544,9 +2364,8 @@ function mountOverlay() {
     return;
   }
 
-  // LAUNCHER_CSS 含 #__worklog_root 的 fixed 定位 + backdrop + close 按鈕樣式。
-  // 移除 installLauncher() 呼叫後，這些規則必須在 mountOverlay 注入，否則
-  // overlay 沒拿到 position: fixed 會掉到 body 末端（normal flow）。
+  // LAUNCHER_CSS 含 #__worklog_root 的 fixed 定位 + backdrop + close 按鈕樣式，
+  // 必須在 mountOverlay 注入，否則 overlay 沒拿到 position: fixed 會掉到 body 末端。
   addCss(LAUNCHER_CSS);
   addCss(APP_CSS);
 
@@ -2559,7 +2378,6 @@ function mountOverlay() {
   // Overlay root
   __overlayRoot = document.createElement("div");
   __overlayRoot.id = OVERLAY_ROOT_ID;
-  __overlayRoot.setAttribute("data-mobile-tab", "issues");
   __overlayRoot.innerHTML = APP_HTML;
   document.body.appendChild(__overlayRoot);
 
@@ -2719,8 +2537,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202604300226";
-const APP_BUILD_TIME = "2026-04-30 02:26";
+const APP_VERSION = "1.0.202605121511";
+const APP_BUILD_TIME = "2026-05-12 15:11";
 
 const state = {
   localToday: localDateString(new Date()),
@@ -2770,10 +2588,8 @@ const state = {
   scheduleBudgets: {},
   budgetEditIssueId: null,
   dailyHourLimit: 6.5,
-  filterExpanded: false,
   theme: "light",
   scheduleCommitResults: [],
-  mobileActiveTab: "issues",
 };
 
 let dragContext = null;
@@ -4367,22 +4183,6 @@ function applySettingsTab() {
   }
 }
 
-function updateMobileNav() {
-  const tab = state.mobileActiveTab;
-  document.body.setAttribute("data-mobile-tab", tab);
-  for (const btn of document.querySelectorAll("#mobile-nav [data-tab]")) {
-    btn.classList.toggle("active", btn.dataset.tab === tab);
-  }
-}
-
-function updateDraftBadge() {
-  const badge = document.getElementById("draft-badge");
-  if (!badge) return;
-  const count = state.draftEntries.length;
-  badge.textContent = String(count);
-  badge.style.display = count > 0 ? "" : "none";
-}
-
 function updateSettingsTheme() {
   for (const btn of document.querySelectorAll("[data-theme-value]")) {
     btn.classList.toggle("active", btn.dataset.themeValue === state.theme);
@@ -4427,34 +4227,7 @@ function updateCommitModalDateWarn() {
   }
 }
 
-function initMobileNav() {
-  for (const btn of document.querySelectorAll("#mobile-nav [data-tab]")) {
-    btn.addEventListener("click", async () => {
-      const tab = btn.dataset.tab;
-      if (tab === "settings") {
-        openSettings();
-        return;
-      }
-      state.mobileActiveTab = tab;
-      if (tab === "schedule" && state.currentSource.type !== "schedule") {
-        try {
-          await switchSource({ type: "schedule" });
-        } catch (err) {
-          state.issueWarnings = [err.message || String(err)];
-        }
-      } else if (tab === "issues" && state.currentSource.type === "schedule") {
-        try {
-          await switchSource({ type: "mine" });
-        } catch (err) {
-          state.issueWarnings = [err.message || String(err)];
-        }
-      }
-      updateMobileNav();
-      updateDraftBadge();
-      updateSettingsTheme();
-      renderAll();
-    });
-  }
+function initThemeButtons() {
   for (const btn of document.querySelectorAll("[data-theme-value]")) {
     btn.addEventListener("click", () => {
       applyTheme(btn.dataset.themeValue);
@@ -4475,9 +4248,6 @@ function renderAll() {
   renderLoadingMask();
   updateButtons();
   updateDailyTotalBadge();
-  updateFilterBadge();
-  updateMobileNav();
-  updateDraftBadge();
   updateSettingsTheme();
   persistState();
 }
@@ -4936,10 +4706,6 @@ function updateDailyTotalBadge() {
   elements.dailyTotalBadge.classList.toggle("overflow", total > limit + 0.001);
 }
 
-function updateFilterBadge() {
-  // 篩選 UI 已整合到 pj-list-toolbar 一行，無 advanced 展開區塊；保留空函式避免破壞呼叫
-}
-
 function collectPhraseFormPayload() {
   const activityInput = getPhraseActivityInput();
   return {
@@ -5050,9 +4816,6 @@ async function initializeApp() {
   } else {
     state.batchSpentOn = daysAgoString(fallbackOffset);
   }
-  if (state.mobileActiveTab === "settings") {
-    state.mobileActiveTab = "issues";
-  }
   updateAboutInfo();
   await withLoading("初始化中...", async () => {
     await Promise.all([fetchActivities(), fetchSavedQueries(), fetchPhrases(), fetchIssueTemplates()]);
@@ -5064,7 +4827,7 @@ async function initializeApp() {
     }
     await fetchIssues();
   });
-  initMobileNav();
+  initThemeButtons();
   renderAll();
 }
 
@@ -5117,10 +4880,8 @@ for (const btn of document.querySelectorAll("[data-side-view]")) {
     try {
       if (target === "schedule" && !isSchedule) {
         await switchSource({ type: "schedule" });
-        state.mobileActiveTab = "schedule";
       } else if (target === "worklog" && isSchedule) {
         await switchSource({ type: "mine" });
-        state.mobileActiveTab = "issues";
       } else if (target === "issue-batch") {
         renderAll();
         if (!state.projectsLoaded || !state.trackersLoaded) {
@@ -5383,6 +5144,8 @@ function boot() {
     setTimeout(injectTopMenu, 500);
   }
   recordIssueVisit().catch(() => {});
+  // 一次性清掉舊浮動按鈕位置殘留（已 deprecated）
+  Store.del('launcher_pos');
   console.log('[LawPJ Worklog] userscript 已就緒（從上方 menu 進入工時助手）');
 }
 if (document.readyState === 'loading') {

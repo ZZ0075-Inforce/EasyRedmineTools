@@ -34,7 +34,7 @@ def extract_html_and_css(html: str) -> tuple[str, str]:
     """從 ui-template.html 抽出 body HTML + <style> 區塊 CSS。
 
     必須先把 <style>...</style> 整段抽掉再找 <body>，否則 CSS 註解裡若含
-    "<body>" 字串（例如 "data-mobile-tab on <body>"），body regex 會錯抓起點。
+    "<body>" 字串，body regex 會錯抓起點。
     """
     style_match = re.search(r"<style>\s*(.*?)\s*</style>", html, re.DOTALL)
     if not style_match:
@@ -463,6 +463,8 @@ def main() -> None:
         "    setTimeout(injectTopMenu, 500);",
         "  }",
         "  recordIssueVisit().catch(() => {});",
+        "  // 一次性清掉舊浮動按鈕位置殘留（已 deprecated）",
+        "  Store.del('launcher_pos');",
         "  console.log('[LawPJ Worklog] userscript 已就緒（從上方 menu 進入工時助手）');",
         "}",
         "if (document.readyState === 'loading') {",

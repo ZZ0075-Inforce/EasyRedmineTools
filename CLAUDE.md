@@ -42,7 +42,7 @@ node -e "new Function(require('fs').readFileSync('dist/worklog.user.js','utf8'))
 | `src-userscript/header.meta.js` | UserScript metadata (@name, @match, @grant, @updateURL) |
 | `src-userscript/runtime.js` | 認證 (session/CSRF + API Key dual-mode)、redmineFetch、preview token + SHA-256 簽章、handler map、訪問記錄 |
 | `src-userscript/menu-injector.js` | 把「⏱ 工時助手」li 注入 Redmine #top-menu-container；定義 `SIDE_VIEWS` 共用陣列 |
-| `src-userscript/overlay.js` | overlay 掛載（fixed inset 32px）+ backdrop + ESC 關閉 + sidebar 動態 render；保留 `installLauncher` 但 boot 已不呼叫 |
+| `src-userscript/overlay.js` | overlay 掛載（fixed inset 32px）+ backdrop + ESC 關閉 + sidebar 動態 render |
 | `src-userscript/settings-patch.js` | 設定 modal 注入「連線」tab（API Key 輸入 / 連線測試）+ sidebar 收合切換 |
 | `src-userscript/ui-template.html` | HTML/CSS template，build 工具直接從中抽 body HTML + CSS |
 | `worklog_app.js` | 前端核心邏輯（state、render、event handler）；build 時包進 `__initWorklogApp()` 並用 `window.__worklog_fetchJson` 取代 fetchJson |
@@ -60,7 +60,7 @@ node -e "new Function(require('fs').readFileSync('dist/worklog.user.js','utf8'))
    - `fetchJson` 函式體（brace-balancing 找完整函式邊界）換成 `return window.__worklog_fetchJson(url, options)`
    - `document.documentElement.setAttribute("data-theme"...)` 改為對 `#__worklog_root` 操作
    - `APP_VERSION` / `APP_BUILD_TIME` 用 regex 替換為 build 時間戳（讓設定→關於跟 @version metadata 同步）
-7. 串接成 IIFE：metadata → APP_HTML/APP_CSS template literals → runtime → settings-patch → overlay → menu-injector → wrapped app-core → bootstrap（boot() 呼叫 `injectTopMenu()` + `recordIssueVisit()`，**不**呼叫 installLauncher）
+7. 串接成 IIFE：metadata → APP_HTML/APP_CSS template literals → runtime → settings-patch → overlay → menu-injector → wrapped app-core → bootstrap（boot() 呼叫 `injectTopMenu()` + `recordIssueVisit()` + 一次性 `Store.del("launcher_pos")` 清舊殘留）
 
 ### 認證設計
 
@@ -91,7 +91,7 @@ Easy Redmine `/issues.json` 對 filter shorthand 不照辦——直接 `?assigne
 - `* { ... }` → `#__worklog_root * { ... }`
 - `@media (...) { ... }` 遞迴處理裡層
 
-`overlay.js` 的 `LAUNCHER_CSS` 額外對 sticky-actions / bottom-tab-bar / shell max-width / overlay min-height 等加 `!important` 防禦覆寫，避免 master CSS 在 overlay 環境下有副作用（例如 `body { min-height: 100vh }` 會撐破 overlay 邊距）。
+`overlay.js` 的 `LAUNCHER_CSS`（沿用舊名，內容已僅剩 overlay root / backdrop / close 按鈕樣式）額外對 sticky-actions / shell max-width / overlay min-height 等加 `!important` 防禦覆寫，避免 master CSS 在 overlay 環境下有副作用（例如 `body { min-height: 100vh }` 會撐破 overlay 邊距）。
 
 ## Storage (Tampermonkey GM)
 
@@ -102,7 +102,6 @@ Easy Redmine `/issues.json` 對 filter shorthand 不照辦——直接 `?assigne
 | `saved_queries` | PJ 篩選器列表 |
 | `issue_templates` | Issue subject 模板列表（嵌在「批次建 issue」view 內，僅存 `{ id, subject }`） |
 | `visited_issues` | 近期查閱清單（保留 7 天，每次訪問 `/issues/{id}` 自動更新） |
-| `launcher_pos` | 浮動 ⏱ 按鈕拖移後的位置（deprecated，已改用 Redmine 頂部 menu 入口） |
 | `side_nav_collapsed` | sidebar 收合狀態（true/false） |
 
 ## API surface (內部 adapter，不對外)
@@ -197,13 +196,10 @@ Easy Redmine `/issues.json` 對 filter shorthand 不照辦——直接 `?assigne
 
 非必要重構，但下次大整理可以一併處理：
 
-- **`installLauncher()` 函式仍保留**在 overlay.js 內（含浮動按鈕拖拉邏輯、launcher_pos 儲存等），但 boot 已不呼叫。LAUNCHER_CSS 改由 mountOverlay 注入。可考慮：(a) 完全移除浮動按鈕相關 code；(b) 改成 menu 注入失敗時的 fallback。
-- **`updateFilterBadge()` 退化成空函式**：篩選 UI 整合後不再有 badge，函式留著只為避免呼叫處 throw。可連 caller 一起清。
-- **`state.filterExpanded` 仍在 state**：對應的 filter-advanced UI 已移除，無作用。可清。
 - **CSS prefix 只處理含連字號 class**：utility class（`.selected` / `.muted` / `.tag` / `.active`）仍裸名，理論上有撞名風險。目前未踩到，未來碰到再個別 rename 加 hyphen。
-- **`bottom-tab-bar` HTML 仍在 ui-template.html**：sidebar 改造後 mobile 也走 sidebar（drawer 模式），bottom-tab-bar 變多餘 fallback。可清。
 - **commit message 被 git hook 改寫**：repo 有 pre-commit hook 把 oneline 改為 `F / LawPJ.tampermonkey / YYYYMMDDNN /` 格式，但 body 內容仍保留中文描述。`git log --oneline` 看不到細節，要 `git log` 看完整 message。這是 repo 慣例不需改。
-- **launcher_pos GM key**：浮動按鈕已不顯示，這個儲存 key 用不到了。下次清 GM 儲存時可移除。
+- **`LAUNCHER_CSS` 常數沿用舊名**：內容已僅剩 overlay root / backdrop / close 按鈕樣式，但常數名沒一起改成 `OVERLAY_CSS`。語意稍弱但無功能差，下次大整理時再改名。
+- **Sidebar 抽屜 (`app-shell.mobile-open`) 邏輯不完整**：CSS 已寫好 (ui-template.html `transform: translateX(-100%)` → `translateX(0)`)，但沒有任何 JS 會 toggle `mobile-open` class，所以 mobile viewport 在 overlay 內 sidebar 永遠收合。需要時補一個 hamburger / 手勢觸發。
 
 ## 已移除（曾經存在）
 

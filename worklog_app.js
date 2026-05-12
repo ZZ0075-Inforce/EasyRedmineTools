@@ -50,10 +50,8 @@ const state = {
   scheduleBudgets: {},
   budgetEditIssueId: null,
   dailyHourLimit: 6.5,
-  filterExpanded: false,
   theme: "light",
   scheduleCommitResults: [],
-  mobileActiveTab: "issues",
 };
 
 let dragContext = null;
@@ -1654,22 +1652,6 @@ function applySettingsTab() {
   }
 }
 
-function updateMobileNav() {
-  const tab = state.mobileActiveTab;
-  document.body.setAttribute("data-mobile-tab", tab);
-  for (const btn of document.querySelectorAll("#mobile-nav [data-tab]")) {
-    btn.classList.toggle("active", btn.dataset.tab === tab);
-  }
-}
-
-function updateDraftBadge() {
-  const badge = document.getElementById("draft-badge");
-  if (!badge) return;
-  const count = state.draftEntries.length;
-  badge.textContent = String(count);
-  badge.style.display = count > 0 ? "" : "none";
-}
-
 function updateSettingsTheme() {
   for (const btn of document.querySelectorAll("[data-theme-value]")) {
     btn.classList.toggle("active", btn.dataset.themeValue === state.theme);
@@ -1714,34 +1696,7 @@ function updateCommitModalDateWarn() {
   }
 }
 
-function initMobileNav() {
-  for (const btn of document.querySelectorAll("#mobile-nav [data-tab]")) {
-    btn.addEventListener("click", async () => {
-      const tab = btn.dataset.tab;
-      if (tab === "settings") {
-        openSettings();
-        return;
-      }
-      state.mobileActiveTab = tab;
-      if (tab === "schedule" && state.currentSource.type !== "schedule") {
-        try {
-          await switchSource({ type: "schedule" });
-        } catch (err) {
-          state.issueWarnings = [err.message || String(err)];
-        }
-      } else if (tab === "issues" && state.currentSource.type === "schedule") {
-        try {
-          await switchSource({ type: "mine" });
-        } catch (err) {
-          state.issueWarnings = [err.message || String(err)];
-        }
-      }
-      updateMobileNav();
-      updateDraftBadge();
-      updateSettingsTheme();
-      renderAll();
-    });
-  }
+function initThemeButtons() {
   for (const btn of document.querySelectorAll("[data-theme-value]")) {
     btn.addEventListener("click", () => {
       applyTheme(btn.dataset.themeValue);
@@ -1762,9 +1717,6 @@ function renderAll() {
   renderLoadingMask();
   updateButtons();
   updateDailyTotalBadge();
-  updateFilterBadge();
-  updateMobileNav();
-  updateDraftBadge();
   updateSettingsTheme();
   persistState();
 }
@@ -2223,10 +2175,6 @@ function updateDailyTotalBadge() {
   elements.dailyTotalBadge.classList.toggle("overflow", total > limit + 0.001);
 }
 
-function updateFilterBadge() {
-  // 篩選 UI 已整合到 list-toolbar 一行，無 advanced 展開區塊；保留空函式避免破壞呼叫
-}
-
 function collectPhraseFormPayload() {
   const activityInput = getPhraseActivityInput();
   return {
@@ -2337,9 +2285,6 @@ async function initializeApp() {
   } else {
     state.batchSpentOn = daysAgoString(fallbackOffset);
   }
-  if (state.mobileActiveTab === "settings") {
-    state.mobileActiveTab = "issues";
-  }
   updateAboutInfo();
   await withLoading("初始化中...", async () => {
     await Promise.all([fetchActivities(), fetchSavedQueries(), fetchPhrases(), fetchIssueTemplates()]);
@@ -2351,7 +2296,7 @@ async function initializeApp() {
     }
     await fetchIssues();
   });
-  initMobileNav();
+  initThemeButtons();
   renderAll();
 }
 
@@ -2404,10 +2349,8 @@ for (const btn of document.querySelectorAll("[data-side-view]")) {
     try {
       if (target === "schedule" && !isSchedule) {
         await switchSource({ type: "schedule" });
-        state.mobileActiveTab = "schedule";
       } else if (target === "worklog" && isSchedule) {
         await switchSource({ type: "mine" });
-        state.mobileActiveTab = "issues";
       } else if (target === "issue-batch") {
         renderAll();
         if (!state.projectsLoaded || !state.trackersLoaded) {
