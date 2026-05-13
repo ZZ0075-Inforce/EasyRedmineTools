@@ -122,7 +122,80 @@ const elements = {
   batchSummary: document.getElementById("batch-summary"),
   batchCreateButton: document.getElementById("batch-create-button"),
   batchResultsList: document.getElementById("batch-results-list"),
+  phrasesAlertStack: document.getElementById("phrases-alert-stack"),
+  sourcesAlertStack: document.getElementById("sources-alert-stack"),
 };
+
+/* ===== Toast：短暫操作反饋 (success / error / info)，自動消失 ============== */
+function showToast(message, { type = "success", duration = 2500 } = {}) {
+  const container = document.getElementById("toast-container");
+  if (!container) return;
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.classList.add("fading");
+    setTimeout(() => toast.remove(), 220);
+  }, duration);
+}
+
+/* ===== Confirm modal：取代 browser confirm()，回傳 Promise<boolean> ======== */
+function showConfirmModal({ title = "確認操作", body = "確定要執行此操作嗎？", confirmText = "確認", cancelText = "取消", danger = true } = {}) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById("confirm-modal");
+    if (!modal) { resolve(window.confirm(body)); return; }
+    document.getElementById("confirm-modal-title").textContent = title;
+    document.getElementById("confirm-modal-body").textContent = body;
+    const confirmBtn = document.getElementById("confirm-modal-confirm");
+    const cancelBtn = document.getElementById("confirm-modal-cancel");
+    const closeBtn = document.getElementById("confirm-modal-close");
+    confirmBtn.textContent = confirmText;
+    confirmBtn.className = danger ? "danger-button" : "action-button";
+    cancelBtn.textContent = cancelText;
+    modal.hidden = false;
+    modal.removeAttribute("aria-hidden");
+    const cleanup = (val) => {
+      modal.hidden = true;
+      modal.setAttribute("aria-hidden", "true");
+      confirmBtn.removeEventListener("click", onConfirm);
+      cancelBtn.removeEventListener("click", onCancel);
+      closeBtn.removeEventListener("click", onCancel);
+      modal.removeEventListener("click", onBackdrop);
+      document.removeEventListener("keydown", onKey);
+      resolve(val);
+    };
+    const onConfirm = () => cleanup(true);
+    const onCancel = () => cleanup(false);
+    const onBackdrop = (e) => { if (e.target === modal) cleanup(false); };
+    const onKey = (e) => {
+      if (e.key === "Escape") cleanup(false);
+      else if (e.key === "Enter") cleanup(true);
+    };
+    confirmBtn.addEventListener("click", onConfirm);
+    cancelBtn.addEventListener("click", onCancel);
+    closeBtn.addEventListener("click", onCancel);
+    modal.addEventListener("click", onBackdrop);
+    document.addEventListener("keydown", onKey);
+    confirmBtn.focus();
+  });
+}
+
+/* ===== Helper: 按鈕 disabled 時動態設 title 解釋為何不可按 ================ */
+function setBtnTitle(btn, text) {
+  if (!btn) return;
+  if (text) btn.title = text;
+  else btn.removeAttribute("title");
+}
+
+/* ===== Empty state HTML helper（各 view 通用結構） ========================= */
+function emptyStateHtml({ icon = "📋", title = "", hint = "" } = {}) {
+  return `<div class="empty-state">
+    ${icon ? `<div class="empty-state-icon" aria-hidden="true">${icon}</div>` : ""}
+    ${title ? `<div class="empty-state-title">${escapeHtml(title)}</div>` : ""}
+    ${hint ? `<div class="empty-state-hint">${escapeHtml(hint)}</div>` : ""}
+  </div>`;
+}
 
 function localDateString(value) {
   const year = value.getFullYear();
@@ -620,11 +693,17 @@ function renderIssueList() {
   }
 
   if (!state.issues.length) {
-    elements.issueList.innerHTML = `
-      <li><div class="empty-state">
-        這個來源沒有符合條件的 issue。可以調整上方的更新日期，或切換到其他 PJ 篩選器。
-      </div></li>
-    `;
+    const icon = state.currentSource.type === "visited" ? "🕒"
+      : state.currentSource.type === "query" ? "🔍"
+      : "📋";
+    const hint = state.currentSource.type === "visited"
+      ? "在 Redmine 點開任一 issue 頁面，userscript 會自動把它記進清單。"
+      : "可以調整上方的更新日期，或切換到其他 PJ 篩選器。";
+    elements.issueList.innerHTML = `<li>${emptyStateHtml({
+      icon,
+      title: "這個來源沒有符合條件的 issue",
+      hint,
+    })}</li>`;
     return;
   }
 
@@ -634,9 +713,11 @@ function renderIssueList() {
   }
 
   if (!visible.length) {
-    elements.issueList.innerHTML = `
-      <li><div class="empty-state">搜尋條件下沒有符合的 issue，試著清空搜尋或調整關鍵字。</div></li>
-    `;
+    elements.issueList.innerHTML = `<li>${emptyStateHtml({
+      icon: "🔎",
+      title: "搜尋條件下沒有符合的 issue",
+      hint: "試著清空搜尋或調整關鍵字。",
+    })}</li>`;
     return;
   }
   elements.issueList.innerHTML = visible.map((issue) => issueCardHtml(issue)).join("");
@@ -644,32 +725,44 @@ function renderIssueList() {
 }
 
 function renderAlerts() {
-  const alerts = [];
+  // 主 alert-stack（worklog/schedule view 內）：issue/activity/preview 相關 + 送出結果
+  const main = [];
   if (state.issueWarnings.length) {
-    alerts.push(`<div class="alert warn">${state.issueWarnings.map(escapeHtml).join("<br>")}</div>`);
+    main.push(`<div class="alert warn">${state.issueWarnings.map(escapeHtml).join("<br>")}</div>`);
   }
   if (state.activityWarnings.length) {
-    alerts.push(`<div class="alert warn">${state.activityWarnings.map(escapeHtml).join("<br>")}</div>`);
-  }
-  if (state.phrasesWarnings.length) {
-    alerts.push(`<div class="alert warn">${state.phrasesWarnings.map(escapeHtml).join("<br>")}</div>`);
-  }
-  if (state.sourcesWarnings.length) {
-    alerts.push(`<div class="alert warn">${state.sourcesWarnings.map(escapeHtml).join("<br>")}</div>`);
+    main.push(`<div class="alert warn">${state.activityWarnings.map(escapeHtml).join("<br>")}</div>`);
   }
   if (state.previewWarnings.length) {
-    alerts.push(`<div class="alert warn">${state.previewWarnings.map(escapeHtml).join("<br>")}</div>`);
+    main.push(`<div class="alert warn">${state.previewWarnings.map(escapeHtml).join("<br>")}</div>`);
   }
   if (state.previewToken) {
-    alerts.push("<div class=\"alert\">已完成預覽。若修改全域日期或任何欄位，必須重新預覽後才能送出。</div>");
+    main.push("<div class=\"alert\">已完成預覽。若修改全域日期或任何欄位，必須重新預覽後才能送出。</div>");
   }
   if (state.commitResults.length) {
-    alerts.push(renderResults());
+    main.push(renderResults());
   }
   if (state.scheduleCommitResults.length) {
-    alerts.push(renderScheduleResults());
+    main.push(renderScheduleResults());
   }
-  elements.alertStack.innerHTML = alerts.join("");
+  if (elements.alertStack) elements.alertStack.innerHTML = main.join("");
+
+  // 分流到各 view 自己的 alert container；找不到容器則 fallback 推回主 stack
+  const phrasesHtml = state.phrasesWarnings.length
+    ? `<div class="alert warn">${state.phrasesWarnings.map(escapeHtml).join("<br>")}</div>` : "";
+  if (elements.phrasesAlertStack) {
+    elements.phrasesAlertStack.innerHTML = phrasesHtml;
+  } else if (phrasesHtml && elements.alertStack) {
+    elements.alertStack.insertAdjacentHTML("beforeend", phrasesHtml);
+  }
+
+  const sourcesHtml = state.sourcesWarnings.length
+    ? `<div class="alert warn">${state.sourcesWarnings.map(escapeHtml).join("<br>")}</div>` : "";
+  if (elements.sourcesAlertStack) {
+    elements.sourcesAlertStack.innerHTML = sourcesHtml;
+  } else if (sourcesHtml && elements.alertStack) {
+    elements.alertStack.insertAdjacentHTML("beforeend", sourcesHtml);
+  }
 }
 
 function renderScheduleResults() {
@@ -867,9 +960,31 @@ function updateButtons() {
   const quickBtns = document.getElementById("date-quick-buttons");
   if (quickBtns) quickBtns.style.display = isSchedule ? "none" : "";
   elements.refreshButton.disabled = state.isLoading;
+  setBtnTitle(elements.refreshButton, state.isLoading && "載入中，請稍候");
   elements.selectAllButton.disabled = isSchedule || state.isLoading || filteredIssues().length === 0;
+  setBtnTitle(elements.selectAllButton,
+    isSchedule ? "排程模式不支援全選"
+    : state.isLoading ? "載入中，請稍候"
+    : filteredIssues().length === 0 ? "目前沒有符合條件的 issue 可選"
+    : null);
   elements.clearSelectionButton.disabled = state.isLoading || selectedCount() === 0;
+  setBtnTitle(elements.clearSelectionButton,
+    state.isLoading ? "載入中，請稍候"
+    : selectedCount() === 0 ? "尚未勾選任何 issue"
+    : null);
   elements.commitButton.disabled = isSchedule || state.isLoading || selectedValidRows().length === 0 || !state.batchSpentOn;
+  setBtnTitle(elements.commitButton,
+    isSchedule ? "排程模式不可送出工時"
+    : state.isLoading ? "載入中，請稍候"
+    : !state.batchSpentOn ? "請先選擇工時日期"
+    : selectedValidRows().length === 0 ? "請先勾選至少一筆 issue 並填工時"
+    : null);
+  if (elements.scheduleApplyButton) {
+    setBtnTitle(elements.scheduleApplyButton,
+      state.isLoading ? "載入中，請稍候"
+      : !isArrange ? "請先進入 Step 2 排程階段"
+      : null);
+  }
   elements.filterDate.disabled = state.isLoading;
   elements.filterSearch.disabled = state.isLoading;
   elements.selectedCount.textContent = `${selectedCount()} 筆`;
@@ -938,16 +1053,25 @@ function renderTable() {
     }
     const startText = state.batchSpentOn || "請先設定開始排程日期";
     elements.workbenchSummary.textContent = `自 ${startText} 起連續十個工作日，每日上限 ${state.dailyHourLimit}h`;
-    elements.tableWrap.innerHTML = renderScheduleGantt();
+    elements.tableWrap.innerHTML = `
+      <div class="schedule-back-row">
+        <button class="ghost-button schedule-back-button" id="schedule-back-button" type="button">← 重新選擇 Project</button>
+      </div>
+      ${renderScheduleGantt()}
+    `;
+    document.getElementById("schedule-back-button")?.addEventListener("click", () => {
+      state.scheduleStage = "select";
+      renderAll();
+    });
     return;
   }
   if (state.draftEntries.length === 0) {
     elements.workbenchSummary.textContent = "先從左側勾選要補登工時的 issue。";
-    elements.tableWrap.innerHTML = `
-      <div class="empty-state">
-        這裡會顯示批次工時表單。勾選 issue 後逐列填寫時數、活動與備註；每列右上角可快速填入預設的工時模板。
-      </div>
-    `;
+    elements.tableWrap.innerHTML = emptyStateHtml({
+      icon: "📋",
+      title: "尚未勾選任何 issue",
+      hint: "← 從左側清單勾選 issue 後，這裡會顯示批次工時表單。每列右上角可快速套用工時模板。",
+    });
     return;
   }
 
@@ -1112,7 +1236,11 @@ function renderScheduleSelectStage() {
   const projectMap = collectAllProjects();
   const projects = Array.from(projectMap.values()).sort((a, b) => a.name.localeCompare(b.name));
   if (!projects.length) {
-    elements.issueList.innerHTML = `<li><div class="empty-state">沒有可排程的 project。先確認「我的 issue」有資料。</div></li>`;
+    elements.issueList.innerHTML = `<li>${emptyStateHtml({
+      icon: "📅",
+      title: "沒有可排程的 project",
+      hint: "先確認「我的 issue」分頁有資料（自己被指派的進行中 issue）。",
+    })}</li>`;
     return;
   }
   elements.issueList.innerHTML = `
@@ -1151,7 +1279,11 @@ function renderScheduleOrderingList() {
       <li class="sched-breadcrumb">
         <button class="ghost-button tiny" id="sched-back-button">← 重新選 project</button>
       </li>
-      <li><div class="empty-state">沒有已勾選的 project，請回到 Step 1 重新選擇。</div></li>
+      <li>${emptyStateHtml({
+        icon: "📅",
+        title: "沒有已勾選的 project",
+        hint: "請回到 Step 1 重新選擇要排程的 project。",
+      })}</li>
     `;
     document.getElementById("sched-back-button")?.addEventListener("click", () => {
       state.scheduleStage = "select";
@@ -1426,13 +1558,19 @@ async function applyScheduleDates() {
   const schedule = computeSchedule();
   const entries = deriveIssueDatesFromSchedule(schedule);
   if (entries.length === 0) {
-    alert("目前沒有排入工時的 issue，無法送出。");
+    showToast("目前沒有排入工時的 issue，無法送出", { type: "error" });
     return;
   }
   const preview = entries
     .map((e) => `  #${e.issue_id} ${e.subject}  ${e.start_date} → ${e.due_date}`)
     .join("\n");
-  if (!confirm(`將更新 ${entries.length} 個 issue 的起迄日期：\n\n${preview}\n\n確定送出？`)) return;
+  const ok = await showConfirmModal({
+    title: "確認送出排程",
+    body: `將更新 ${entries.length} 個 issue 的起迄日期：\n\n${preview}\n\n確定送出？`,
+    confirmText: "送出",
+    danger: false,
+  });
+  if (!ok) return;
   const payload = {
     entries: entries.map((e) => ({
       issue_id: e.issue_id,
@@ -1485,7 +1623,11 @@ function renderScheduleGantt() {
     .filter(Boolean)
     .join("");
   if (!dayCards) {
-    return `<div class="empty-state">沒有需要排程的 issue（預算皆為 0），或還沒勾選任何 project。</div>`;
+    return emptyStateHtml({
+      icon: "📅",
+      title: "沒有需要排程的 issue",
+      hint: "預算皆為 0 或還沒勾選任何 project。可回 Step 1 重選或在預算欄位填入時數。",
+    });
   }
   return `<div class="gantt-days">${dayCards}</div>`;
 }
@@ -1505,7 +1647,11 @@ function phrasePresetLabel(phrase) {
 function renderPhrasesDrawer() {
   renderPhraseActivityField();
   if (!state.phrases.length) {
-    elements.phrasesList.innerHTML = `<div class="empty-state">還沒有工時模板。用上方表單建立常用的時數 / 活動 / 備註組合，之後在每筆工時右上角的「快速填入」下拉就能直接套用。</div>`;
+    elements.phrasesList.innerHTML = emptyStateHtml({
+      icon: "✏️",
+      title: "還沒有工時模板",
+      hint: "用上方表單建立常用的時數 / 活動 / 備註組合，之後在每筆工時卡片右上角的「快速填入」下拉一鍵套用。",
+    });
     return;
   }
   elements.phrasesList.innerHTML = state.phrases
@@ -1536,9 +1682,18 @@ function renderPhrasesDrawer() {
     btn.addEventListener("click", async (event) => {
       event.stopPropagation();
       const phraseId = event.currentTarget.dataset.deletePhrase;
-      if (!confirm("確定要刪除這筆工時模板？")) return;
+      const phrase = state.phrases.find((p) => p.id === phraseId);
+      const name = phrase?.label || phrase?.comments?.slice(0, 30) || "此模板";
+      const ok = await showConfirmModal({
+        title: "刪除工時模板",
+        body: `確定要刪除「${name}」嗎？\n此操作無法復原。`,
+        confirmText: "刪除",
+        danger: true,
+      });
+      if (!ok) return;
       try {
         await withLoading("刪除工時模板中...", () => deletePhraseById(phraseId));
+        showToast("已刪除工時模板");
         renderAll();  // 整體刷新，entry 下拉同步少這筆
       } catch (error) {
         state.phrasesWarnings = [error.message || String(error)];
@@ -1604,7 +1759,11 @@ function applyPhraseFields(phrase, entry) {
 
 function renderSourcesDrawer() {
   if (!state.savedQueries.length) {
-    elements.savedQueriesList.innerHTML = `<div class="empty-state">尚未加入任何 PJ 篩選器。先去 Redmine 建立自訂查詢，從網址 <code>?query_id=X</code> 抓 ID 加入這裡。</div>`;
+    elements.savedQueriesList.innerHTML = emptyStateHtml({
+      icon: "🔍",
+      title: "尚未加入任何 PJ 篩選器",
+      hint: "先去 Redmine 建立自訂查詢，從網址 ?query_id=X 抓 ID 與顯示名稱填進上方表單。",
+    });
   } else {
     elements.savedQueriesList.innerHTML = state.savedQueries
       .map(
@@ -1626,8 +1785,18 @@ function renderSourcesDrawer() {
   for (const btn of elements.savedQueriesList.querySelectorAll("[data-remove-query]")) {
     btn.addEventListener("click", async (event) => {
       const qid = Number(event.currentTarget.dataset.removeQuery);
+      const target = state.savedQueries.find((q) => q.query_id === qid);
+      const name = target?.name || `#${qid}`;
+      const ok = await showConfirmModal({
+        title: "移除 PJ 篩選器",
+        body: `確定要移除「${name}」嗎？此操作只會從工具裡拿掉，不會影響 Redmine 本身的查詢。`,
+        confirmText: "移除",
+        danger: true,
+      });
+      if (!ok) return;
       try {
         await withLoading("移除 PJ 篩選器...", () => removeSavedQuery(qid));
+        showToast("已移除 PJ 篩選器");
         renderAll();  // source-tabs 與 saved-queries-list 同步刷新
       } catch (error) {
         state.sourcesWarnings = [error.message || String(error)];
@@ -1908,7 +2077,8 @@ function renderBatchTemplatesPicker() {
   for (const cb of box.querySelectorAll("[data-batch-template-toggle]")) {
     cb.addEventListener("change", (e) => {
       const id = e.currentTarget.dataset.batchTemplateToggle;
-      if (e.currentTarget.checked) {
+      const wasAdded = e.currentTarget.checked;
+      if (wasAdded) {
         state.batchSelectedTemplateIds.add(id);
         // 若還沒對應 row 才 push（避免重複勾選 → 重複觸發 → 重複加列）
         if (!state.batchRows.some((r) => r.templateId === id)) {
@@ -1924,6 +2094,13 @@ function renderBatchTemplatesPicker() {
       renderBatchRowsTable();
       renderBatchSummary();
       renderBatchAlerts();
+      // 套用模板加入新列後自動 scroll 到表格，讓使用者知道列已加入
+      if (wasAdded) {
+        requestAnimationFrame(() => {
+          const tbl = document.getElementById("batch-rows-table");
+          if (tbl) tbl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        });
+      }
     });
   }
   for (const btn of box.querySelectorAll("[data-edit-issue-template]")) {
@@ -1938,9 +2115,18 @@ function renderBatchTemplatesPicker() {
       e.stopPropagation();
       e.preventDefault();
       const tplId = e.currentTarget.dataset.deleteIssueTemplate;
-      if (!confirm("確定要刪除這筆 issue 模板？")) return;
+      const tpl = state.issueTemplates.find((t) => t.id === tplId);
+      const subj = tpl?.subject?.slice(0, 40) || "此模板";
+      const ok = await showConfirmModal({
+        title: "刪除 issue 模板",
+        body: `確定要刪除「${subj}」嗎？\n此操作無法復原。`,
+        confirmText: "刪除",
+        danger: true,
+      });
+      if (!ok) return;
       try {
         await withLoading("刪除 issue 模板中...", () => deleteIssueTemplateById(tplId));
+        showToast("已刪除 issue 模板");
         renderBatchTemplatesPicker();
       } catch (err) {
         state.issueTemplatesWarnings = [err.message || String(err)];
@@ -1955,7 +2141,11 @@ function renderBatchRowsTable() {
   const tbody = elements.batchRowsTbody;
   if (!tbody) return;
   if (!state.batchRows.length) {
-    tbody.innerHTML = `<tr><td colspan="5"><div class="batch-empty-state">還沒有要建立的 issue。請從上方勾選模板後按「套用」，或直接「新增空白列」。</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5">${emptyStateHtml({
+      icon: "➕",
+      title: "還沒有要建立的 issue",
+      hint: "從上方勾選 issue 模板自動加入列，或按「新增空白列」直接手動加。",
+    })}</td></tr>`;
     return;
   }
   tbody.innerHTML = state.batchRows.map((row) => `
@@ -2394,8 +2584,12 @@ for (const btn of elements.settingsModal.querySelectorAll("[data-settings-tab]")
 }
 
 elements.phraseAddButton.addEventListener("click", async () => {
+  const wasEditing = !!state.editingPhraseId;
   try {
     await withLoading("儲存工時模板中...", addOrUpdatePhrase);
+    if (!state.phrasesWarnings.length) {
+      showToast(wasEditing ? "已更新工時模板" : "已新增工時模板");
+    }
     renderAll();  // 整體 re-render 讓 entry 下拉、phrases-list 同步
   } catch (error) {
     state.phrasesWarnings = [error.message || String(error)];
@@ -2410,6 +2604,7 @@ elements.phraseCancelButton.addEventListener("click", () => {
 elements.queryAddButton.addEventListener("click", async () => {
   try {
     await withLoading("加入 PJ 篩選器中...", addSavedQuery);
+    if (!state.sourcesWarnings.length) showToast("已新增 PJ 篩選器");
     renderAll();  // source-tabs、saved-queries-list、view 都同步
   } catch (error) {
     state.sourcesWarnings = [error.message || String(error)];
@@ -2504,8 +2699,12 @@ if (elements.scheduleApplyButton) {
 
 if (elements.issueTemplateAddButton) {
   elements.issueTemplateAddButton.addEventListener("click", async () => {
+    const wasEditing = !!state.editingIssueTemplateId;
     try {
       await withLoading("儲存 issue 模板中...", addOrUpdateIssueTemplate);
+      if (!(state.issueTemplatesWarnings && state.issueTemplatesWarnings.length)) {
+        showToast(wasEditing ? "已更新 issue 模板" : "已新增 issue 模板");
+      }
       renderBatchTemplatesPicker();
       renderBatchAlerts();
     } catch (err) {
@@ -2563,9 +2762,15 @@ if (elements.batchAddBlankRowButton) {
   });
 }
 if (elements.batchClearRowsButton) {
-  elements.batchClearRowsButton.addEventListener("click", () => {
+  elements.batchClearRowsButton.addEventListener("click", async () => {
     if (!state.batchRows.length) return;
-    if (!confirm("確定要清空所有列？")) return;
+    const ok = await showConfirmModal({
+      title: "清空所有列",
+      body: `確定要清空目前 ${state.batchRows.length} 列待建 issue？\n此操作無法復原。`,
+      confirmText: "清空",
+      danger: true,
+    });
+    if (!ok) return;
     state.batchRows = [];
     state.batchSelectedTemplateIds.clear();
     state.batchWarnings = [];

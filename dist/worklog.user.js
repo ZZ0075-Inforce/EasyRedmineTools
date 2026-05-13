@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605121859
+// @version      1.0.202605130947
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -19,6 +19,8 @@
   'use strict';
 
 const APP_HTML = `<div class="pj-app-shell">
+      <!-- Mobile only: hamburger to toggle sidebar drawer -->
+      <button class="pj-mobile-side-toggle" id="pj-mobile-side-toggle" type="button" aria-label="開啟側邊欄">☰</button>
       <aside class="pj-side-nav" id="pj-side-nav">
         <div class="pj-side-nav-head">
           <span class="pj-side-nav-brand">⏱ Worklog</span>
@@ -133,6 +135,7 @@ const APP_HTML = `<div class="pj-app-shell">
             <h2 class="pj-view-title">✏️ 工時模板</h2>
             <p class="muted">每筆工時卡片右上角的「快速填入」可一鍵套用模板。內容存在瀏覽器 GM 儲存。</p>
           </div>
+          <div class="pj-alert-stack" id="phrases-alert-stack"></div>
           <div class="pj-add-form">
             <label class="pj-field-stack">
               <span>標籤 (選填)</span>
@@ -167,6 +170,7 @@ const APP_HTML = `<div class="pj-app-shell">
             <h2 class="pj-view-title">🔍 PJ 篩選器</h2>
             <p class="muted">把你在 Redmine 建好的自訂查詢（Custom Query）加入這裡作為「填寫工時」分頁。從 Redmine 網址列抓 <code>?query_id=X</code> 與顯示名稱貼進來即可。</p>
           </div>
+          <div class="pj-alert-stack" id="sources-alert-stack"></div>
           <div class="pj-add-form">
             <label class="pj-field-stack">
               <span>顯示名稱</span>
@@ -296,6 +300,26 @@ const APP_HTML = `<div class="pj-app-shell">
     </div>
 
     <!-- Commit Confirmation Modal -->
+    <!-- Generic Confirm Modal（取代 browser confirm()） -->
+    <div id="confirm-modal" class="pj-modal-overlay" hidden aria-hidden="true">
+      <div class="pj-modal-box pj-modal-box-sm" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title">
+        <div class="pj-modal-header">
+          <h3 id="confirm-modal-title">確認操作</h3>
+          <button class="pj-modal-x" id="confirm-modal-close" aria-label="關閉">&times;</button>
+        </div>
+        <div class="pj-modal-body">
+          <p id="pj-confirm-modal-body" class="pj-confirm-modal-body">確定要執行此操作嗎？</p>
+        </div>
+        <div class="pj-modal-footer">
+          <button class="pj-ghost-button" id="confirm-modal-cancel">取消</button>
+          <button class="pj-danger-button" id="confirm-modal-confirm">確認</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast container（短暫操作反饋） -->
+    <div id="pj-toast-container" class="pj-toast-container" aria-live="polite" aria-atomic="false"></div>
+
     <div id="commit-modal" class="pj-modal-overlay" hidden aria-hidden="true">
       <div class="pj-modal-box" role="dialog" aria-modal="true" aria-labelledby="commit-modal-title">
         <div class="pj-modal-header">
@@ -1353,6 +1377,78 @@ const APP_CSS = `#__worklog_root {
           margin-bottom: 4px;
         }#__worklog_root .pj-hours-input { max-width: none; }#__worklog_root .pj-col-send, #__worklog_root .pj-col-hours, #__worklog_root .pj-col-activity, #__worklog_root .pj-col-comments, #__worklog_root .pj-col-check { width: auto; }#__worklog_root .pj-batch-meta { flex-direction: column; align-items: stretch; }#__worklog_root .pj-date-quick-buttons { width: 100%; }#__worklog_root .pj-date-quick-buttons .pj-quick-btn { flex: 1; text-align: center; }#__worklog_root .pj-details-panel { padding-bottom: 80px; }#__worklog_root .pj-action-button, #__worklog_root .pj-ghost-button, #__worklog_root .pj-danger-button { min-height: 44px; }#__worklog_root .pj-quick-btn { min-height: 40px; }#__worklog_root input[type="date"], #__worklog_root input[type="number"], #__worklog_root input[type="text"], #__worklog_root select { min-height: 44px; }
       }@media (min-width: 768px) {#__worklog_root .layout { grid-template-columns: 1fr 1.2fr; gap: 16px; }
+      }#__worklog_root .pj-modal-box-sm { max-width: 360px; }#__worklog_root .pj-confirm-modal-body {
+        margin: 0;
+        font-size: 14px;
+        color: var(--ink);
+        line-height: 1.55;
+        white-space: pre-line;
+      }#__worklog_root .pj-empty-state {
+        display: grid;
+        justify-items: center;
+        gap: 10px;
+        padding: 36px 20px;
+        text-align: center;
+        color: var(--muted);
+      }#__worklog_root .pj-empty-state-icon { font-size: 36px; line-height: 1; opacity: 0.5; }#__worklog_root .pj-empty-state-title { font-size: 15px; color: var(--ink); font-weight: 500; }#__worklog_root .pj-empty-state-hint { font-size: 13px; max-width: 320px; }#__worklog_root .pj-toast-container {
+        position: absolute;
+        bottom: 20px;
+        right: 20px;
+        z-index: 50;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        pointer-events: none;
+      }#__worklog_root .toast {
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-left: 4px solid var(--accent);
+        border-radius: 8px;
+        padding: 10px 14px;
+        font-size: 13px;
+        color: var(--ink);
+        box-shadow: var(--shadow);
+        max-width: 320px;
+        animation: toast-in 200ms ease-out;
+        pointer-events: auto;
+      }#__worklog_root .toast.success { border-left-color: #4a9b6e; }#__worklog_root .toast.error { border-left-color: var(--danger, var(--accent)); }#__worklog_root .toast.info { border-left-color: var(--accent); }#__worklog_root .toast.fading { animation: toast-out 200ms ease-in forwards; }
+      @keyframes toast-in {
+        from { transform: translateX(20px); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
+      }
+      @keyframes toast-out {
+        from { opacity: 1; }
+        to { opacity: 0; transform: translateX(20px); }
+      }#__worklog_root .pj-mobile-side-toggle {
+        display: none;
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        z-index: 25;
+        width: 40px;
+        height: 40px;
+        border-radius: 8px;
+        border: 1px solid var(--panel-border);
+        background: var(--panel);
+        color: var(--ink);
+        font-size: 18px;
+        cursor: pointer;
+        box-shadow: var(--shadow);
+        align-items: center;
+        justify-content: center;
+      }#__worklog_root .pj-mobile-side-toggle:hover { background: var(--subtle); }#__worklog_root .pj-schedule-back-button {
+        margin-bottom: 8px;
+        font-size: 13px;
+      }@media (max-width: 767px) {#__worklog_root .pj-main-view { padding-bottom: 76px; }#__worklog_root .pj-mobile-side-toggle { display: inline-flex; }#__worklog_root .shell { padding-top: 56px; }#__worklog_root .pj-app-shell.pj-mobile-open::before {
+          content: "";
+          position: absolute;
+          inset: 0;
+          background: rgba(15, 23, 42, 0.4);
+          z-index: 20;
+        }#__worklog_root .pj-app-shell.pj-mobile-open .pj-side-nav { z-index: 30; }#__worklog_root .pj-settings-tabs {
+          mask-image: linear-gradient(to right, black 88%, transparent);
+          -webkit-mask-image: linear-gradient(to right, black 88%, transparent);
+        }#__worklog_root .pj-toast-container { right: 12px; left: 12px; bottom: 80px; align-items: flex-end; }#__worklog_root .toast { max-width: none; width: 100%; }
       }`;
 
 /* ===== Storage layer (GM 或 localStorage fallback) ========================= */
@@ -2008,7 +2104,7 @@ window.__worklog_redmineFetch = redmineFetch;
 
 /* ===== 綁 sidebar 收合按鈕（Notion-style 收合）+ 設定 modal 注入 ========== */
 function applySettingsPatches(root) {
-  // Sidebar 收合
+  // Sidebar 收合（desktop）
   const appShell = root.querySelector(".pj-app-shell");
   const sideToggle = root.querySelector("#pj-side-nav-toggle");
   if (appShell && sideToggle) {
@@ -2020,6 +2116,27 @@ function applySettingsPatches(root) {
       const collapsed = !appShell.classList.contains("collapsed");
       appShell.classList.toggle("collapsed", collapsed);
       Store.set("side_nav_collapsed", collapsed);
+    });
+  }
+
+  // Mobile sidebar 抽屜 toggle（hamburger button）
+  const mobileToggle = root.querySelector("#pj-mobile-side-toggle");
+  if (appShell && mobileToggle) {
+    mobileToggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      appShell.classList.toggle("pj-mobile-open");
+    });
+    // 點 sidebar 內任一 view button 或 settings 按鈕後自動關抽屜
+    appShell.addEventListener("click", (e) => {
+      if (!appShell.classList.contains("pj-mobile-open")) return;
+      if (e.target.closest("[data-side-view]") || e.target.closest("#settings-button")) {
+        appShell.classList.remove("pj-mobile-open");
+        return;
+      }
+      // 點 sidebar 外（即 main shell 區域）也關抽屜
+      if (!e.target.closest(".pj-side-nav") && !e.target.closest("#pj-mobile-side-toggle")) {
+        appShell.classList.remove("pj-mobile-open");
+      }
     });
   }
 
@@ -2549,8 +2666,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605121859";
-const APP_BUILD_TIME = "2026-05-12 18:59";
+const APP_VERSION = "1.0.202605130947";
+const APP_BUILD_TIME = "2026-05-13 09:47";
 
 const state = {
   localToday: localDateString(new Date()),
@@ -2672,7 +2789,80 @@ const elements = {
   batchSummary: document.getElementById("batch-summary"),
   batchCreateButton: document.getElementById("batch-create-button"),
   batchResultsList: document.getElementById("batch-results-list"),
+  phrasesAlertStack: document.getElementById("phrases-alert-stack"),
+  sourcesAlertStack: document.getElementById("sources-alert-stack"),
 };
+
+/* ===== Toast：短暫操作反饋 (success / error / info)，自動消失 ============== */
+function showToast(message, { type = "success", duration = 2500 } = {}) {
+  const container = document.getElementById("pj-toast-container");
+  if (!container) return;
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.classList.add("fading");
+    setTimeout(() => toast.remove(), 220);
+  }, duration);
+}
+
+/* ===== Confirm modal：取代 browser confirm()，回傳 Promise<boolean> ======== */
+function showConfirmModal({ title = "確認操作", body = "確定要執行此操作嗎？", confirmText = "確認", cancelText = "取消", danger = true } = {}) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById("confirm-modal");
+    if (!modal) { resolve(window.confirm(body)); return; }
+    document.getElementById("confirm-modal-title").textContent = title;
+    document.getElementById("pj-confirm-modal-body").textContent = body;
+    const confirmBtn = document.getElementById("confirm-modal-confirm");
+    const cancelBtn = document.getElementById("confirm-modal-cancel");
+    const closeBtn = document.getElementById("confirm-modal-close");
+    confirmBtn.textContent = confirmText;
+    confirmBtn.className = danger ? "pj-danger-button" : "pj-action-button";
+    cancelBtn.textContent = cancelText;
+    modal.hidden = false;
+    modal.removeAttribute("aria-hidden");
+    const cleanup = (val) => {
+      modal.hidden = true;
+      modal.setAttribute("aria-hidden", "true");
+      confirmBtn.removeEventListener("click", onConfirm);
+      cancelBtn.removeEventListener("click", onCancel);
+      closeBtn.removeEventListener("click", onCancel);
+      modal.removeEventListener("click", onBackdrop);
+      document.removeEventListener("keydown", onKey);
+      resolve(val);
+    };
+    const onConfirm = () => cleanup(true);
+    const onCancel = () => cleanup(false);
+    const onBackdrop = (e) => { if (e.target === modal) cleanup(false); };
+    const onKey = (e) => {
+      if (e.key === "Escape") cleanup(false);
+      else if (e.key === "Enter") cleanup(true);
+    };
+    confirmBtn.addEventListener("click", onConfirm);
+    cancelBtn.addEventListener("click", onCancel);
+    closeBtn.addEventListener("click", onCancel);
+    modal.addEventListener("click", onBackdrop);
+    document.addEventListener("keydown", onKey);
+    confirmBtn.focus();
+  });
+}
+
+/* ===== Helper: 按鈕 disabled 時動態設 title 解釋為何不可按 ================ */
+function setBtnTitle(btn, text) {
+  if (!btn) return;
+  if (text) btn.title = text;
+  else btn.removeAttribute("title");
+}
+
+/* ===== Empty state HTML helper（各 view 通用結構） ========================= */
+function emptyStateHtml({ icon = "📋", title = "", hint = "" } = {}) {
+  return `<div class="pj-empty-state">
+    ${icon ? `<div class="pj-empty-state-icon" aria-hidden="true">${icon}</div>` : ""}
+    ${title ? `<div class="pj-empty-state-title">${escapeHtml(title)}</div>` : ""}
+    ${hint ? `<div class="pj-empty-state-hint">${escapeHtml(hint)}</div>` : ""}
+  </div>`;
+}
 
 function localDateString(value) {
   const year = value.getFullYear();
@@ -3163,11 +3353,17 @@ function renderIssueList() {
   }
 
   if (!state.issues.length) {
-    elements.issueList.innerHTML = `
-      <li><div class="pj-empty-state">
-        這個來源沒有符合條件的 issue。可以調整上方的更新日期，或切換到其他 PJ 篩選器。
-      </div></li>
-    `;
+    const icon = state.currentSource.type === "visited" ? "🕒"
+      : state.currentSource.type === "query" ? "🔍"
+      : "📋";
+    const hint = state.currentSource.type === "visited"
+      ? "在 Redmine 點開任一 issue 頁面，userscript 會自動把它記進清單。"
+      : "可以調整上方的更新日期，或切換到其他 PJ 篩選器。";
+    elements.issueList.innerHTML = `<li>${emptyStateHtml({
+      icon,
+      title: "這個來源沒有符合條件的 issue",
+      hint,
+    })}</li>`;
     return;
   }
 
@@ -3177,9 +3373,11 @@ function renderIssueList() {
   }
 
   if (!visible.length) {
-    elements.issueList.innerHTML = `
-      <li><div class="pj-empty-state">搜尋條件下沒有符合的 issue，試著清空搜尋或調整關鍵字。</div></li>
-    `;
+    elements.issueList.innerHTML = `<li>${emptyStateHtml({
+      icon: "🔎",
+      title: "搜尋條件下沒有符合的 issue",
+      hint: "試著清空搜尋或調整關鍵字。",
+    })}</li>`;
     return;
   }
   elements.issueList.innerHTML = visible.map((issue) => issueCardHtml(issue)).join("");
@@ -3187,32 +3385,44 @@ function renderIssueList() {
 }
 
 function renderAlerts() {
-  const alerts = [];
+  // 主 pj-alert-stack（worklog/schedule view 內）：issue/activity/preview 相關 + 送出結果
+  const main = [];
   if (state.issueWarnings.length) {
-    alerts.push(`<div class="alert warn">${state.issueWarnings.map(escapeHtml).join("<br>")}</div>`);
+    main.push(`<div class="alert warn">${state.issueWarnings.map(escapeHtml).join("<br>")}</div>`);
   }
   if (state.activityWarnings.length) {
-    alerts.push(`<div class="alert warn">${state.activityWarnings.map(escapeHtml).join("<br>")}</div>`);
-  }
-  if (state.phrasesWarnings.length) {
-    alerts.push(`<div class="alert warn">${state.phrasesWarnings.map(escapeHtml).join("<br>")}</div>`);
-  }
-  if (state.sourcesWarnings.length) {
-    alerts.push(`<div class="alert warn">${state.sourcesWarnings.map(escapeHtml).join("<br>")}</div>`);
+    main.push(`<div class="alert warn">${state.activityWarnings.map(escapeHtml).join("<br>")}</div>`);
   }
   if (state.previewWarnings.length) {
-    alerts.push(`<div class="alert warn">${state.previewWarnings.map(escapeHtml).join("<br>")}</div>`);
+    main.push(`<div class="alert warn">${state.previewWarnings.map(escapeHtml).join("<br>")}</div>`);
   }
   if (state.previewToken) {
-    alerts.push("<div class=\"alert\">已完成預覽。若修改全域日期或任何欄位，必須重新預覽後才能送出。</div>");
+    main.push("<div class=\"alert\">已完成預覽。若修改全域日期或任何欄位，必須重新預覽後才能送出。</div>");
   }
   if (state.commitResults.length) {
-    alerts.push(renderResults());
+    main.push(renderResults());
   }
   if (state.scheduleCommitResults.length) {
-    alerts.push(renderScheduleResults());
+    main.push(renderScheduleResults());
   }
-  elements.alertStack.innerHTML = alerts.join("");
+  if (elements.alertStack) elements.alertStack.innerHTML = main.join("");
+
+  // 分流到各 view 自己的 alert container；找不到容器則 fallback 推回主 stack
+  const phrasesHtml = state.phrasesWarnings.length
+    ? `<div class="alert warn">${state.phrasesWarnings.map(escapeHtml).join("<br>")}</div>` : "";
+  if (elements.phrasesAlertStack) {
+    elements.phrasesAlertStack.innerHTML = phrasesHtml;
+  } else if (phrasesHtml && elements.alertStack) {
+    elements.alertStack.insertAdjacentHTML("beforeend", phrasesHtml);
+  }
+
+  const sourcesHtml = state.sourcesWarnings.length
+    ? `<div class="alert warn">${state.sourcesWarnings.map(escapeHtml).join("<br>")}</div>` : "";
+  if (elements.sourcesAlertStack) {
+    elements.sourcesAlertStack.innerHTML = sourcesHtml;
+  } else if (sourcesHtml && elements.alertStack) {
+    elements.alertStack.insertAdjacentHTML("beforeend", sourcesHtml);
+  }
 }
 
 function renderScheduleResults() {
@@ -3410,9 +3620,31 @@ function updateButtons() {
   const quickBtns = document.getElementById("pj-date-quick-buttons");
   if (quickBtns) quickBtns.style.display = isSchedule ? "none" : "";
   elements.refreshButton.disabled = state.isLoading;
+  setBtnTitle(elements.refreshButton, state.isLoading && "載入中，請稍候");
   elements.selectAllButton.disabled = isSchedule || state.isLoading || filteredIssues().length === 0;
+  setBtnTitle(elements.selectAllButton,
+    isSchedule ? "排程模式不支援全選"
+    : state.isLoading ? "載入中，請稍候"
+    : filteredIssues().length === 0 ? "目前沒有符合條件的 issue 可選"
+    : null);
   elements.clearSelectionButton.disabled = state.isLoading || selectedCount() === 0;
+  setBtnTitle(elements.clearSelectionButton,
+    state.isLoading ? "載入中，請稍候"
+    : selectedCount() === 0 ? "尚未勾選任何 issue"
+    : null);
   elements.commitButton.disabled = isSchedule || state.isLoading || selectedValidRows().length === 0 || !state.batchSpentOn;
+  setBtnTitle(elements.commitButton,
+    isSchedule ? "排程模式不可送出工時"
+    : state.isLoading ? "載入中，請稍候"
+    : !state.batchSpentOn ? "請先選擇工時日期"
+    : selectedValidRows().length === 0 ? "請先勾選至少一筆 issue 並填工時"
+    : null);
+  if (elements.scheduleApplyButton) {
+    setBtnTitle(elements.scheduleApplyButton,
+      state.isLoading ? "載入中，請稍候"
+      : !isArrange ? "請先進入 Step 2 排程階段"
+      : null);
+  }
   elements.filterDate.disabled = state.isLoading;
   elements.filterSearch.disabled = state.isLoading;
   elements.selectedCount.textContent = `${selectedCount()} 筆`;
@@ -3481,16 +3713,25 @@ function renderTable() {
     }
     const startText = state.batchSpentOn || "請先設定開始排程日期";
     elements.workbenchSummary.textContent = `自 ${startText} 起連續十個工作日，每日上限 ${state.dailyHourLimit}h`;
-    elements.tableWrap.innerHTML = renderScheduleGantt();
+    elements.tableWrap.innerHTML = `
+      <div class="schedule-back-row">
+        <button class="pj-ghost-button pj-schedule-back-button" id="pj-schedule-back-button" type="button">← 重新選擇 Project</button>
+      </div>
+      ${renderScheduleGantt()}
+    `;
+    document.getElementById("pj-schedule-back-button")?.addEventListener("click", () => {
+      state.scheduleStage = "select";
+      renderAll();
+    });
     return;
   }
   if (state.draftEntries.length === 0) {
     elements.workbenchSummary.textContent = "先從左側勾選要補登工時的 issue。";
-    elements.tableWrap.innerHTML = `
-      <div class="pj-empty-state">
-        這裡會顯示批次工時表單。勾選 issue 後逐列填寫時數、活動與備註；每列右上角可快速填入預設的工時模板。
-      </div>
-    `;
+    elements.tableWrap.innerHTML = emptyStateHtml({
+      icon: "📋",
+      title: "尚未勾選任何 issue",
+      hint: "← 從左側清單勾選 issue 後，這裡會顯示批次工時表單。每列右上角可快速套用工時模板。",
+    });
     return;
   }
 
@@ -3655,7 +3896,11 @@ function renderScheduleSelectStage() {
   const projectMap = collectAllProjects();
   const projects = Array.from(projectMap.values()).sort((a, b) => a.name.localeCompare(b.name));
   if (!projects.length) {
-    elements.issueList.innerHTML = `<li><div class="pj-empty-state">沒有可排程的 project。先確認「我的 issue」有資料。</div></li>`;
+    elements.issueList.innerHTML = `<li>${emptyStateHtml({
+      icon: "📅",
+      title: "沒有可排程的 project",
+      hint: "先確認「我的 issue」分頁有資料（自己被指派的進行中 issue）。",
+    })}</li>`;
     return;
   }
   elements.issueList.innerHTML = `
@@ -3694,7 +3939,11 @@ function renderScheduleOrderingList() {
       <li class="pj-sched-breadcrumb">
         <button class="pj-ghost-button tiny" id="sched-back-button">← 重新選 project</button>
       </li>
-      <li><div class="pj-empty-state">沒有已勾選的 project，請回到 Step 1 重新選擇。</div></li>
+      <li>${emptyStateHtml({
+        icon: "📅",
+        title: "沒有已勾選的 project",
+        hint: "請回到 Step 1 重新選擇要排程的 project。",
+      })}</li>
     `;
     document.getElementById("sched-back-button")?.addEventListener("click", () => {
       state.scheduleStage = "select";
@@ -3969,13 +4218,19 @@ async function applyScheduleDates() {
   const schedule = computeSchedule();
   const entries = deriveIssueDatesFromSchedule(schedule);
   if (entries.length === 0) {
-    alert("目前沒有排入工時的 issue，無法送出。");
+    showToast("目前沒有排入工時的 issue，無法送出", { type: "error" });
     return;
   }
   const preview = entries
     .map((e) => `  #${e.issue_id} ${e.subject}  ${e.start_date} → ${e.due_date}`)
     .join("\n");
-  if (!confirm(`將更新 ${entries.length} 個 issue 的起迄日期：\n\n${preview}\n\n確定送出？`)) return;
+  const ok = await showConfirmModal({
+    title: "確認送出排程",
+    body: `將更新 ${entries.length} 個 issue 的起迄日期：\n\n${preview}\n\n確定送出？`,
+    confirmText: "送出",
+    danger: false,
+  });
+  if (!ok) return;
   const payload = {
     entries: entries.map((e) => ({
       issue_id: e.issue_id,
@@ -4028,7 +4283,11 @@ function renderScheduleGantt() {
     .filter(Boolean)
     .join("");
   if (!dayCards) {
-    return `<div class="pj-empty-state">沒有需要排程的 issue（預算皆為 0），或還沒勾選任何 project。</div>`;
+    return emptyStateHtml({
+      icon: "📅",
+      title: "沒有需要排程的 issue",
+      hint: "預算皆為 0 或還沒勾選任何 project。可回 Step 1 重選或在預算欄位填入時數。",
+    });
   }
   return `<div class="pj-gantt-days">${dayCards}</div>`;
 }
@@ -4048,7 +4307,11 @@ function phrasePresetLabel(phrase) {
 function renderPhrasesDrawer() {
   renderPhraseActivityField();
   if (!state.phrases.length) {
-    elements.phrasesList.innerHTML = `<div class="pj-empty-state">還沒有工時模板。用上方表單建立常用的時數 / 活動 / 備註組合，之後在每筆工時右上角的「快速填入」下拉就能直接套用。</div>`;
+    elements.phrasesList.innerHTML = emptyStateHtml({
+      icon: "✏️",
+      title: "還沒有工時模板",
+      hint: "用上方表單建立常用的時數 / 活動 / 備註組合，之後在每筆工時卡片右上角的「快速填入」下拉一鍵套用。",
+    });
     return;
   }
   elements.phrasesList.innerHTML = state.phrases
@@ -4079,9 +4342,18 @@ function renderPhrasesDrawer() {
     btn.addEventListener("click", async (event) => {
       event.stopPropagation();
       const phraseId = event.currentTarget.dataset.deletePhrase;
-      if (!confirm("確定要刪除這筆工時模板？")) return;
+      const phrase = state.phrases.find((p) => p.id === phraseId);
+      const name = phrase?.label || phrase?.comments?.slice(0, 30) || "此模板";
+      const ok = await showConfirmModal({
+        title: "刪除工時模板",
+        body: `確定要刪除「${name}」嗎？\n此操作無法復原。`,
+        confirmText: "刪除",
+        danger: true,
+      });
+      if (!ok) return;
       try {
         await withLoading("刪除工時模板中...", () => deletePhraseById(phraseId));
+        showToast("已刪除工時模板");
         renderAll();  // 整體刷新，entry 下拉同步少這筆
       } catch (error) {
         state.phrasesWarnings = [error.message || String(error)];
@@ -4147,7 +4419,11 @@ function applyPhraseFields(phrase, entry) {
 
 function renderSourcesDrawer() {
   if (!state.savedQueries.length) {
-    elements.savedQueriesList.innerHTML = `<div class="pj-empty-state">尚未加入任何 PJ 篩選器。先去 Redmine 建立自訂查詢，從網址 <code>?query_id=X</code> 抓 ID 加入這裡。</div>`;
+    elements.savedQueriesList.innerHTML = emptyStateHtml({
+      icon: "🔍",
+      title: "尚未加入任何 PJ 篩選器",
+      hint: "先去 Redmine 建立自訂查詢，從網址 ?query_id=X 抓 ID 與顯示名稱填進上方表單。",
+    });
   } else {
     elements.savedQueriesList.innerHTML = state.savedQueries
       .map(
@@ -4169,8 +4445,18 @@ function renderSourcesDrawer() {
   for (const btn of elements.savedQueriesList.querySelectorAll("[data-remove-query]")) {
     btn.addEventListener("click", async (event) => {
       const qid = Number(event.currentTarget.dataset.removeQuery);
+      const target = state.savedQueries.find((q) => q.query_id === qid);
+      const name = target?.name || `#${qid}`;
+      const ok = await showConfirmModal({
+        title: "移除 PJ 篩選器",
+        body: `確定要移除「${name}」嗎？此操作只會從工具裡拿掉，不會影響 Redmine 本身的查詢。`,
+        confirmText: "移除",
+        danger: true,
+      });
+      if (!ok) return;
       try {
         await withLoading("移除 PJ 篩選器...", () => removeSavedQuery(qid));
+        showToast("已移除 PJ 篩選器");
         renderAll();  // pj-source-tabs 與 saved-queries-list 同步刷新
       } catch (error) {
         state.sourcesWarnings = [error.message || String(error)];
@@ -4451,7 +4737,8 @@ function renderBatchTemplatesPicker() {
   for (const cb of box.querySelectorAll("[data-batch-template-toggle]")) {
     cb.addEventListener("change", (e) => {
       const id = e.currentTarget.dataset.batchTemplateToggle;
-      if (e.currentTarget.checked) {
+      const wasAdded = e.currentTarget.checked;
+      if (wasAdded) {
         state.batchSelectedTemplateIds.add(id);
         // 若還沒對應 row 才 push（避免重複勾選 → 重複觸發 → 重複加列）
         if (!state.batchRows.some((r) => r.templateId === id)) {
@@ -4467,6 +4754,13 @@ function renderBatchTemplatesPicker() {
       renderBatchRowsTable();
       renderBatchSummary();
       renderBatchAlerts();
+      // 套用模板加入新列後自動 scroll 到表格，讓使用者知道列已加入
+      if (wasAdded) {
+        requestAnimationFrame(() => {
+          const tbl = document.getElementById("pj-batch-rows-table");
+          if (tbl) tbl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        });
+      }
     });
   }
   for (const btn of box.querySelectorAll("[data-edit-issue-template]")) {
@@ -4481,9 +4775,18 @@ function renderBatchTemplatesPicker() {
       e.stopPropagation();
       e.preventDefault();
       const tplId = e.currentTarget.dataset.deleteIssueTemplate;
-      if (!confirm("確定要刪除這筆 issue 模板？")) return;
+      const tpl = state.issueTemplates.find((t) => t.id === tplId);
+      const subj = tpl?.subject?.slice(0, 40) || "此模板";
+      const ok = await showConfirmModal({
+        title: "刪除 issue 模板",
+        body: `確定要刪除「${subj}」嗎？\n此操作無法復原。`,
+        confirmText: "刪除",
+        danger: true,
+      });
+      if (!ok) return;
       try {
         await withLoading("刪除 issue 模板中...", () => deleteIssueTemplateById(tplId));
+        showToast("已刪除 issue 模板");
         renderBatchTemplatesPicker();
       } catch (err) {
         state.issueTemplatesWarnings = [err.message || String(err)];
@@ -4498,7 +4801,11 @@ function renderBatchRowsTable() {
   const tbody = elements.batchRowsTbody;
   if (!tbody) return;
   if (!state.batchRows.length) {
-    tbody.innerHTML = `<tr><td colspan="5"><div class="pj-batch-empty-state">還沒有要建立的 issue。請從上方勾選模板後按「套用」，或直接「新增空白列」。</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5">${emptyStateHtml({
+      icon: "➕",
+      title: "還沒有要建立的 issue",
+      hint: "從上方勾選 issue 模板自動加入列，或按「新增空白列」直接手動加。",
+    })}</td></tr>`;
     return;
   }
   tbody.innerHTML = state.batchRows.map((row) => `
@@ -4937,8 +5244,12 @@ for (const btn of elements.settingsModal.querySelectorAll("[data-settings-tab]")
 }
 
 elements.phraseAddButton.addEventListener("click", async () => {
+  const wasEditing = !!state.editingPhraseId;
   try {
     await withLoading("儲存工時模板中...", addOrUpdatePhrase);
+    if (!state.phrasesWarnings.length) {
+      showToast(wasEditing ? "已更新工時模板" : "已新增工時模板");
+    }
     renderAll();  // 整體 re-render 讓 entry 下拉、phrases-list 同步
   } catch (error) {
     state.phrasesWarnings = [error.message || String(error)];
@@ -4953,6 +5264,7 @@ elements.phraseCancelButton.addEventListener("click", () => {
 elements.queryAddButton.addEventListener("click", async () => {
   try {
     await withLoading("加入 PJ 篩選器中...", addSavedQuery);
+    if (!state.sourcesWarnings.length) showToast("已新增 PJ 篩選器");
     renderAll();  // pj-source-tabs、saved-queries-list、view 都同步
   } catch (error) {
     state.sourcesWarnings = [error.message || String(error)];
@@ -5047,8 +5359,12 @@ if (elements.scheduleApplyButton) {
 
 if (elements.issueTemplateAddButton) {
   elements.issueTemplateAddButton.addEventListener("click", async () => {
+    const wasEditing = !!state.editingIssueTemplateId;
     try {
       await withLoading("儲存 issue 模板中...", addOrUpdateIssueTemplate);
+      if (!(state.issueTemplatesWarnings && state.issueTemplatesWarnings.length)) {
+        showToast(wasEditing ? "已更新 issue 模板" : "已新增 issue 模板");
+      }
       renderBatchTemplatesPicker();
       renderBatchAlerts();
     } catch (err) {
@@ -5106,9 +5422,15 @@ if (elements.batchAddBlankRowButton) {
   });
 }
 if (elements.batchClearRowsButton) {
-  elements.batchClearRowsButton.addEventListener("click", () => {
+  elements.batchClearRowsButton.addEventListener("click", async () => {
     if (!state.batchRows.length) return;
-    if (!confirm("確定要清空所有列？")) return;
+    const ok = await showConfirmModal({
+      title: "清空所有列",
+      body: `確定要清空目前 ${state.batchRows.length} 列待建 issue？\n此操作無法復原。`,
+      confirmText: "清空",
+      danger: true,
+    });
+    if (!ok) return;
     state.batchRows = [];
     state.batchSelectedTemplateIds.clear();
     state.batchWarnings = [];

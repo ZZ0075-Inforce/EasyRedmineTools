@@ -1525,10 +1525,131 @@
       @media (min-width: 768px) {
         .layout { grid-template-columns: 1fr 1.2fr; gap: 16px; }
       }
+
+      /* ─── Confirm modal: small box variant ──────────────────── */
+      .modal-box-sm { max-width: 360px; }
+      .confirm-modal-body {
+        margin: 0;
+        font-size: 14px;
+        color: var(--ink);
+        line-height: 1.55;
+        white-space: pre-line;
+      }
+
+      /* ─── Empty state（各 view 共用結構） ───────────────────── */
+      .empty-state {
+        display: grid;
+        justify-items: center;
+        gap: 10px;
+        padding: 36px 20px;
+        text-align: center;
+        color: var(--muted);
+      }
+      .empty-state-icon { font-size: 36px; line-height: 1; opacity: 0.5; }
+      .empty-state-title { font-size: 15px; color: var(--ink); font-weight: 500; }
+      .empty-state-hint { font-size: 13px; max-width: 320px; }
+
+      /* ─── Toast container（短暫操作反饋） ──────────────────── */
+      .toast-container {
+        position: absolute;
+        bottom: 20px;
+        right: 20px;
+        z-index: 50;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        pointer-events: none;
+      }
+      .toast {
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-left: 4px solid var(--accent);
+        border-radius: 8px;
+        padding: 10px 14px;
+        font-size: 13px;
+        color: var(--ink);
+        box-shadow: var(--shadow);
+        max-width: 320px;
+        animation: toast-in 200ms ease-out;
+        pointer-events: auto;
+      }
+      .toast.success { border-left-color: #4a9b6e; }
+      .toast.error { border-left-color: var(--danger, var(--accent)); }
+      .toast.info { border-left-color: var(--accent); }
+      .toast.fading { animation: toast-out 200ms ease-in forwards; }
+      @keyframes toast-in {
+        from { transform: translateX(20px); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
+      }
+      @keyframes toast-out {
+        from { opacity: 1; }
+        to { opacity: 0; transform: translateX(20px); }
+      }
+
+      /* ─── Mobile sidebar toggle（漢堡按鈕） ────────────────── */
+      .mobile-side-toggle {
+        display: none;
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        z-index: 25;
+        width: 40px;
+        height: 40px;
+        border-radius: 8px;
+        border: 1px solid var(--panel-border);
+        background: var(--panel);
+        color: var(--ink);
+        font-size: 18px;
+        cursor: pointer;
+        box-shadow: var(--shadow);
+        align-items: center;
+        justify-content: center;
+      }
+      .mobile-side-toggle:hover { background: var(--subtle); }
+
+      /* ─── Schedule arrange back button ──────────────────────── */
+      .schedule-back-button {
+        margin-bottom: 8px;
+        font-size: 13px;
+      }
+
+      /* ─── Mobile overrides for new components ──────────────── */
+      @media (max-width: 767px) {
+        /* 各 main-view 補底 padding，避免 sticky-actions 蓋住末列 */
+        .main-view { padding-bottom: 76px; }
+
+        /* 漢堡按鈕顯示 */
+        .mobile-side-toggle { display: inline-flex; }
+
+        /* shell 內容讓出漢堡按鈕空間 */
+        .shell { padding-top: 56px; }
+
+        /* sidebar 抽屜開啟時的半透明 backdrop */
+        .app-shell.mobile-open::before {
+          content: "";
+          position: absolute;
+          inset: 0;
+          background: rgba(15, 23, 42, 0.4);
+          z-index: 20;
+        }
+        .app-shell.mobile-open .side-nav { z-index: 30; }
+
+        /* settings tabs 滾動提示：右側淡出漸層暗示有更多 tab */
+        .settings-tabs {
+          mask-image: linear-gradient(to right, black 88%, transparent);
+          -webkit-mask-image: linear-gradient(to right, black 88%, transparent);
+        }
+
+        /* toast 在 mobile 拉滿寬 */
+        .toast-container { right: 12px; left: 12px; bottom: 80px; align-items: flex-end; }
+        .toast { max-width: none; width: 100%; }
+      }
     </style>
   </head>
   <body>
     <div class="app-shell">
+      <!-- Mobile only: hamburger to toggle sidebar drawer -->
+      <button class="mobile-side-toggle" id="mobile-side-toggle" type="button" aria-label="開啟側邊欄">☰</button>
       <aside class="side-nav" id="side-nav">
         <div class="side-nav-head">
           <span class="side-nav-brand">⏱ Worklog</span>
@@ -1643,6 +1764,7 @@
             <h2 class="view-title">✏️ 工時模板</h2>
             <p class="muted">每筆工時卡片右上角的「快速填入」可一鍵套用模板。內容存在瀏覽器 GM 儲存。</p>
           </div>
+          <div class="alert-stack" id="phrases-alert-stack"></div>
           <div class="add-form">
             <label class="field-stack">
               <span>標籤 (選填)</span>
@@ -1677,6 +1799,7 @@
             <h2 class="view-title">🔍 PJ 篩選器</h2>
             <p class="muted">把你在 Redmine 建好的自訂查詢（Custom Query）加入這裡作為「填寫工時」分頁。從 Redmine 網址列抓 <code>?query_id=X</code> 與顯示名稱貼進來即可。</p>
           </div>
+          <div class="alert-stack" id="sources-alert-stack"></div>
           <div class="add-form">
             <label class="field-stack">
               <span>顯示名稱</span>
@@ -1806,6 +1929,26 @@
     </div>
 
     <!-- Commit Confirmation Modal -->
+    <!-- Generic Confirm Modal（取代 browser confirm()） -->
+    <div id="confirm-modal" class="modal-overlay" hidden aria-hidden="true">
+      <div class="modal-box modal-box-sm" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title">
+        <div class="modal-header">
+          <h3 id="confirm-modal-title">確認操作</h3>
+          <button class="modal-x" id="confirm-modal-close" aria-label="關閉">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p id="confirm-modal-body" class="confirm-modal-body">確定要執行此操作嗎？</p>
+        </div>
+        <div class="modal-footer">
+          <button class="ghost-button" id="confirm-modal-cancel">取消</button>
+          <button class="danger-button" id="confirm-modal-confirm">確認</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast container（短暫操作反饋） -->
+    <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="false"></div>
+
     <div id="commit-modal" class="modal-overlay" hidden aria-hidden="true">
       <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="commit-modal-title">
         <div class="modal-header">

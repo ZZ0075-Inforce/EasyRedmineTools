@@ -1,6 +1,6 @@
 /* ===== 綁 sidebar 收合按鈕（Notion-style 收合）+ 設定 modal 注入 ========== */
 function applySettingsPatches(root) {
-  // Sidebar 收合
+  // Sidebar 收合（desktop）
   const appShell = root.querySelector(".app-shell");
   const sideToggle = root.querySelector("#side-nav-toggle");
   if (appShell && sideToggle) {
@@ -12,6 +12,27 @@ function applySettingsPatches(root) {
       const collapsed = !appShell.classList.contains("collapsed");
       appShell.classList.toggle("collapsed", collapsed);
       Store.set("side_nav_collapsed", collapsed);
+    });
+  }
+
+  // Mobile sidebar 抽屜 toggle（hamburger button）
+  const mobileToggle = root.querySelector("#mobile-side-toggle");
+  if (appShell && mobileToggle) {
+    mobileToggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      appShell.classList.toggle("mobile-open");
+    });
+    // 點 sidebar 內任一 view button 或 settings 按鈕後自動關抽屜
+    appShell.addEventListener("click", (e) => {
+      if (!appShell.classList.contains("mobile-open")) return;
+      if (e.target.closest("[data-side-view]") || e.target.closest("#settings-button")) {
+        appShell.classList.remove("mobile-open");
+        return;
+      }
+      // 點 sidebar 外（即 main shell 區域）也關抽屜
+      if (!e.target.closest(".side-nav") && !e.target.closest("#mobile-side-toggle")) {
+        appShell.classList.remove("mobile-open");
+      }
     });
   }
 
