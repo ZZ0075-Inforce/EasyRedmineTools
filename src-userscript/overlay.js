@@ -89,10 +89,10 @@ const LAUNCHER_CSS = `
 
 #${CLOSE_BTN_ID} {
   position: fixed !important;
-  top: 36px;
-  right: 36px;
+  top: 32px;
+  right: 32px;
   z-index: 2147483648 !important;
-  width: 36px; height: 36px;
+  width: 40px; height: 40px;
   border-radius: 50%;
   background: rgba(255,255,255,.9);
   border: 1px solid rgba(0,0,0,.1);
@@ -111,7 +111,10 @@ const LAUNCHER_CSS = `
     top: 12px !important; left: 12px !important;
     right: 12px !important; bottom: 12px !important;
   }
-  #${CLOSE_BTN_ID} { top: 22px; right: 22px; }
+  #${CLOSE_BTN_ID} {
+    top: 16px; right: 16px;
+    width: 44px; height: 44px;
+  }
 }
 `;
 

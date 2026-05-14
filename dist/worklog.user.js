@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605130947
+// @version      1.0.202605141004
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -351,7 +351,7 @@ const APP_CSS = `#__worklog_root {
         --panel-border: #e8e2da;
         --divider: #efe8e1;
         --ink: #2c2c2c;
-        --muted: #5f5a54;
+        --muted: #4a4540;
         --accent: #d13a3a;
         --accent-hover: #b92f2f;
         --accent-soft: rgba(209, 58, 58, 0.08);
@@ -367,6 +367,7 @@ const APP_CSS = `#__worklog_root {
         --warn-text: #b7791f;
         --shadow: 0 1px 2px rgba(44,44,44,.04);
         --shadow-md: 0 2px 8px rgba(44,44,44,.06);
+        --backdrop: rgba(15, 23, 42, 0.45);
         --input-bg: #fdfaf7;
         --hover-bg: rgba(44, 44, 44, 0.04);
         --card-bg: #fdfaf7;
@@ -394,6 +395,7 @@ const APP_CSS = `#__worklog_root {
         --warn-text: #dcb671;
         --shadow: 0 1px 2px rgba(0,0,0,.3);
         --shadow-md: 0 2px 8px rgba(0,0,0,.4);
+        --backdrop: rgba(0, 0, 0, 0.65);
         --input-bg: #252220;
         --hover-bg: rgba(242, 237, 231, 0.05);
         --card-bg: #2a2624;
@@ -500,6 +502,7 @@ const APP_CSS = `#__worklog_root {
         display: inline-flex; align-items: center; gap: 6px;
         cursor: pointer; user-select: none;
       }#__worklog_root .pj-batch-template-chip-toggle input { margin: 0; }#__worklog_root .pj-batch-template-chip-action {
+        position: relative;
         display: inline-flex; align-items: center; justify-content: center;
         width: 28px; height: 28px;
         background: transparent;
@@ -708,7 +711,14 @@ const APP_CSS = `#__worklog_root {
         background: transparent;
         color: var(--ink);
         border: 1px solid var(--panel-border);
-      }#__worklog_root .pj-ghost-button:hover { background: var(--subtle); }#__worklog_root .pj-danger-button { background: transparent; color: var(--danger); border: 1px solid var(--panel-border); }#__worklog_root .pj-danger-button:hover { background: var(--danger-soft); border-color: var(--danger); }#__worklog_root button:disabled { opacity: 0.4; cursor: not-allowed; }#__worklog_root .pj-theme-toggle {
+      }#__worklog_root .pj-ghost-button:hover { background: var(--subtle); }#__worklog_root .pj-danger-button { background: transparent; color: var(--danger); border: 1px solid var(--panel-border); }#__worklog_root .pj-danger-button:hover { background: var(--danger-soft); border-color: var(--danger); }#__worklog_root button:disabled {
+        opacity: 0.55;
+        filter: grayscale(0.4);
+        cursor: not-allowed;
+      }#__worklog_root button:focus-visible, #__worklog_root[role="button"]:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }#__worklog_root .pj-theme-toggle {
         border: 0;
         background: transparent;
         font-size: 18px;
@@ -967,8 +977,8 @@ const APP_CSS = `#__worklog_root {
         background: var(--input-bg);
         color: var(--ink);
         transition: border-color 150ms ease-out;
-      }#__worklog_root input:focus, #__worklog_root select:focus, #__worklog_root textarea:focus {
-        outline: 2px solid var(--accent-soft);
+      }#__worklog_root input:focus-visible, #__worklog_root select:focus-visible, #__worklog_root textarea:focus-visible {
+        outline: 2px solid var(--accent);
         outline-offset: 1px;
         border-color: var(--accent);
       }#__worklog_root input::placeholder, #__worklog_root textarea::placeholder { color: var(--muted); }#__worklog_root textarea { height: auto; min-height: 88px; padding: 10px 12px; resize: vertical; line-height: 1.55; }#__worklog_root .pj-comment-cell textarea {
@@ -989,7 +999,7 @@ const APP_CSS = `#__worklog_root {
         transition: border-color 150ms ease-out;
       }#__worklog_root .pj-hours-stepper:focus-within {
         border-color: var(--accent);
-        outline: 2px solid var(--accent-soft);
+        outline: 2px solid var(--accent);
         outline-offset: 1px;
       }#__worklog_root .pj-stepper-btn {
         width: 40px;
@@ -1088,7 +1098,7 @@ const APP_CSS = `#__worklog_root {
       }#__worklog_root .pj-drawer-backdrop {
         position: fixed;
         inset: 0;
-        background: rgba(15, 23, 42, 0.38);
+        background: var(--backdrop);
         opacity: 0;
         pointer-events: none;
         transition: opacity 180ms ease;
@@ -1136,7 +1146,7 @@ const APP_CSS = `#__worklog_root {
         inset: 0;
         display: grid;
         place-items: center;
-        background: rgba(15, 23, 42, 0.35);
+        background: var(--backdrop);
         opacity: 0;
         pointer-events: none;
         transition: opacity 140ms ease;
@@ -1160,7 +1170,7 @@ const APP_CSS = `#__worklog_root {
       }
       @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }#__worklog_root .pj-modal-overlay {
         position: fixed; inset: 0; z-index: 50;
-        background: rgba(15,23,42,.5);
+        background: var(--backdrop);
         display: flex; align-items: center; justify-content: center;
         padding: 16px;
       }#__worklog_root .pj-modal-overlay[hidden] { display: none; }#__worklog_root .pj-modal-box {
@@ -1443,12 +1453,16 @@ const APP_CSS = `#__worklog_root {
           content: "";
           position: absolute;
           inset: 0;
-          background: rgba(15, 23, 42, 0.4);
+          background: var(--backdrop);
           z-index: 20;
         }#__worklog_root .pj-app-shell.pj-mobile-open .pj-side-nav { z-index: 30; }#__worklog_root .pj-settings-tabs {
           mask-image: linear-gradient(to right, black 88%, transparent);
           -webkit-mask-image: linear-gradient(to right, black 88%, transparent);
-        }#__worklog_root .pj-toast-container { right: 12px; left: 12px; bottom: 80px; align-items: flex-end; }#__worklog_root .toast { max-width: none; width: 100%; }
+        }#__worklog_root .pj-toast-container { right: 12px; left: 12px; bottom: 80px; align-items: flex-end; }#__worklog_root .toast { max-width: none; width: 100%; }#__worklog_root .pj-batch-template-chip-action::before {
+          content: "";
+          position: absolute;
+          inset: -6px;
+        }
       }`;
 
 /* ===== Storage layer (GM 或 localStorage fallback) ========================= */
@@ -2437,10 +2451,10 @@ const LAUNCHER_CSS = `
 
 #${CLOSE_BTN_ID} {
   position: fixed !important;
-  top: 36px;
-  right: 36px;
+  top: 32px;
+  right: 32px;
   z-index: 2147483648 !important;
-  width: 36px; height: 36px;
+  width: 40px; height: 40px;
   border-radius: 50%;
   background: rgba(255,255,255,.9);
   border: 1px solid rgba(0,0,0,.1);
@@ -2459,7 +2473,10 @@ const LAUNCHER_CSS = `
     top: 12px !important; left: 12px !important;
     right: 12px !important; bottom: 12px !important;
   }
-  #${CLOSE_BTN_ID} { top: 22px; right: 22px; }
+  #${CLOSE_BTN_ID} {
+    top: 16px; right: 16px;
+    width: 44px; height: 44px;
+  }
 }
 `;
 
@@ -2666,8 +2683,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605130947";
-const APP_BUILD_TIME = "2026-05-13 09:47";
+const APP_VERSION = "1.0.202605141004";
+const APP_BUILD_TIME = "2026-05-14 10:04";
 
 const state = {
   localToday: localDateString(new Date()),

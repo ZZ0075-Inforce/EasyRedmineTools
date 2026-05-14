@@ -15,7 +15,7 @@
         --panel-border: #e8e2da;
         --divider: #efe8e1;
         --ink: #2c2c2c;
-        --muted: #5f5a54;
+        --muted: #4a4540;
         --accent: #d13a3a;
         --accent-hover: #b92f2f;
         --accent-soft: rgba(209, 58, 58, 0.08);
@@ -31,6 +31,7 @@
         --warn-text: #b7791f;
         --shadow: 0 1px 2px rgba(44,44,44,.04);
         --shadow-md: 0 2px 8px rgba(44,44,44,.06);
+        --backdrop: rgba(15, 23, 42, 0.45);
         --input-bg: #fdfaf7;
         --hover-bg: rgba(44, 44, 44, 0.04);
         --card-bg: #fdfaf7;
@@ -60,6 +61,7 @@
         --warn-text: #dcb671;
         --shadow: 0 1px 2px rgba(0,0,0,.3);
         --shadow-md: 0 2px 8px rgba(0,0,0,.4);
+        --backdrop: rgba(0, 0, 0, 0.65);
         --input-bg: #252220;
         --hover-bg: rgba(242, 237, 231, 0.05);
         --card-bg: #2a2624;
@@ -210,6 +212,7 @@
       }
       .batch-template-chip-toggle input { margin: 0; }
       .batch-template-chip-action {
+        position: relative;
         display: inline-flex; align-items: center; justify-content: center;
         width: 28px; height: 28px;
         background: transparent;
@@ -509,7 +512,16 @@
       .ghost-button:hover { background: var(--subtle); }
       .danger-button { background: transparent; color: var(--danger); border: 1px solid var(--panel-border); }
       .danger-button:hover { background: var(--danger-soft); border-color: var(--danger); }
-      button:disabled { opacity: 0.4; cursor: not-allowed; }
+      button:disabled {
+        opacity: 0.55;
+        filter: grayscale(0.4);
+        cursor: not-allowed;
+      }
+      button:focus-visible,
+      [role="button"]:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
 
       .theme-toggle {
         border: 0;
@@ -910,8 +922,8 @@
         color: var(--ink);
         transition: border-color 150ms ease-out;
       }
-      input:focus, select:focus, textarea:focus {
-        outline: 2px solid var(--accent-soft);
+      input:focus-visible, select:focus-visible, textarea:focus-visible {
+        outline: 2px solid var(--accent);
         outline-offset: 1px;
         border-color: var(--accent);
       }
@@ -940,7 +952,7 @@
       }
       .hours-stepper:focus-within {
         border-color: var(--accent);
-        outline: 2px solid var(--accent-soft);
+        outline: 2px solid var(--accent);
         outline-offset: 1px;
       }
       .stepper-btn {
@@ -1079,7 +1091,7 @@
       .drawer-backdrop {
         position: fixed;
         inset: 0;
-        background: rgba(15, 23, 42, 0.38);
+        background: var(--backdrop);
         opacity: 0;
         pointer-events: none;
         transition: opacity 180ms ease;
@@ -1148,7 +1160,7 @@
         inset: 0;
         display: grid;
         place-items: center;
-        background: rgba(15, 23, 42, 0.35);
+        background: var(--backdrop);
         opacity: 0;
         pointer-events: none;
         transition: opacity 140ms ease;
@@ -1178,7 +1190,7 @@
       /* ─── Commit Confirmation Modal ───────────────────────── */
       .modal-overlay {
         position: fixed; inset: 0; z-index: 50;
-        background: rgba(15,23,42,.5);
+        background: var(--backdrop);
         display: flex; align-items: center; justify-content: center;
         padding: 16px;
       }
@@ -1629,7 +1641,7 @@
           content: "";
           position: absolute;
           inset: 0;
-          background: rgba(15, 23, 42, 0.4);
+          background: var(--backdrop);
           z-index: 20;
         }
         .app-shell.mobile-open .side-nav { z-index: 30; }
@@ -1643,6 +1655,13 @@
         /* toast 在 mobile 拉滿寬 */
         .toast-container { right: 12px; left: 12px; bottom: 80px; align-items: flex-end; }
         .toast { max-width: none; width: 100%; }
+
+        /* chip action 視覺維持 28×28，::before 把 hit area 擴到 40×40 */
+        .batch-template-chip-action::before {
+          content: "";
+          position: absolute;
+          inset: -6px;
+        }
       }
     </style>
   </head>
