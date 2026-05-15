@@ -17,25 +17,34 @@ function getIssueIdFromPath() {
 /* ----- 入口：boot 階段呼叫 / toggle ON 立即呼叫 ----- */
 function installInlineTools() {
   if (!isIssueDetailPage()) return;
-  // Toggle 檢查：default true 保持向後相容
-  if (Store.get("inline_tools_enabled", true) === false) return;
-  installQuickEditForm();
-  installWorktimeToolbar();
+  // 兩個獨立 toggle: quick edit form 與 worktime toolbar 各自 default true
+  if (Store.get("inline_quick_edit_enabled", true) !== false) {
+    installQuickEditForm();
+  }
+  if (Store.get("inline_toolbar_enabled", true) !== false) {
+    installWorktimeToolbar();
+  }
 }
 
-/* ----- 反向：toggle OFF 時移除已注入 DOM ----- */
-function uninstallInlineTools() {
-  // 移除 quick-edit form
+/* ----- 反向：個別 unmount ----- */
+function uninstallQuickEditForm() {
   const form = document.getElementById(INLINE_FORM_ID);
   if (form) form.remove();
-  // 移除 toolbar marker + 所有 toolbar items
+}
+
+function uninstallWorktimeToolbar() {
   const marker = document.getElementById(INLINE_TOOLBAR_ID);
   if (marker) marker.remove();
   for (const li of document.querySelectorAll('[data-worklog-inline-toolbar-item="1"]')) {
     li.remove();
   }
-  // 注意:不移除 #__worklog_inline_modal 與 toast container 因為若 modal 開啟中
-  // 移除會 race；它們留著沒副作用 (惰性使用)。
+}
+
+function uninstallInlineTools() {
+  // 全部 unmount (保留作為公用 API, 內部呼叫個別 uninstall)
+  uninstallQuickEditForm();
+  uninstallWorktimeToolbar();
+  // 注意:不移除 #__worklog_inline_modal 與 toast container (race + 惰性元素)
 }
 
 /* ----- inline toast（self-contained，因為 worklog_app.js 的 showToast 在 __initWorklogApp wrap 內取不到） ----- */
@@ -474,5 +483,9 @@ const INLINE_CSS = `
 
 window.__worklog_installInlineTools = installInlineTools;
 window.__worklog_uninstallInlineTools = uninstallInlineTools;
+window.__worklog_installQuickEditForm = installQuickEditForm;
+window.__worklog_uninstallQuickEditForm = uninstallQuickEditForm;
+window.__worklog_installWorktimeToolbar = installWorktimeToolbar;
+window.__worklog_uninstallWorktimeToolbar = uninstallWorktimeToolbar;
 window.__worklog_installInlineModal = installInlineModal;
 window.__worklog_inlineToast = inlineToast;

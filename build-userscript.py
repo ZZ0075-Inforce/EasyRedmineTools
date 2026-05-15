@@ -475,6 +475,8 @@ def main() -> None:
         "  // inline 工具改用 phrase 關聯後不再用獨立 activity / comment 設定",
         "  Store.del('inline_default_activity_id');",
         "  Store.del('inline_default_comment');",
+        "  // 舊單一 toggle 已拆為 quick_edit / toolbar 兩個獨立 toggle",
+        "  Store.del('inline_tools_enabled');",
         "  console.log('[LawPJ Worklog] userscript 已就緒（從上方 menu 進入工時助手）');",
         "}",
         "if (document.readyState === 'loading') {",

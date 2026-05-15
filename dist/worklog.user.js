@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605151759
+// @version      1.0.202605151811
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -267,14 +267,26 @@ const APP_HTML = `<div class="pj-app-shell">
           </div>
 
           <section class="pj-add-form" style="margin-bottom: 12px;">
-            <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
-              <input type="checkbox" id="inline-tools-enabled-toggle" style="width: 18px; height: 18px; margin-top: 2px; flex-shrink: 0;">
+            <div class="pj-settings-group-hint" style="margin-bottom: 10px;">
+              <strong>功能開關</strong>：兩個 inline 功能可以個別開關。立即生效（會移除目前頁面已注入的元素）。
+            </div>
+            <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; margin-bottom: 10px;">
+              <input type="checkbox" id="inline-quick-edit-enabled-toggle" style="width: 18px; height: 18px; margin-top: 2px; flex-shrink: 0;">
               <div style="flex: 1;">
-                <div style="font-weight: 500;">啟用 Inline 工具</div>
-                <div class="muted" style="font-size: 12px; margin-top: 2px;">關閉後 issue 詳細頁不再注入 quick-edit form 與 worktime toolbar。立即生效（會移除目前頁面已注入的元素）。</div>
+                <div style="font-weight: 500;">啟用 Quick Edit 表單</div>
+                <div class="muted" style="font-size: 12px; margin-top: 2px;">issue 詳細頁 #issue_detail_header 上方注入「預估工時 / 開始日期 / 完成日期 / 更新」表單（取代舊 PJ_起迄耗時）。</div>
               </div>
             </label>
-            <div id="inline-tools-enabled-status" class="muted" style="font-size: 13px; min-height: 18px; margin-top: 6px;"></div>
+            <div id="inline-quick-edit-enabled-status" class="muted" style="font-size: 13px; min-height: 18px; margin-bottom: 12px;"></div>
+
+            <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="inline-toolbar-enabled-toggle" style="width: 18px; height: 18px; margin-top: 2px; flex-shrink: 0;">
+              <div style="flex: 1;">
+                <div style="font-weight: 500;">啟用 Worktime Toolbar</div>
+                <div class="muted" style="font-size: 12px; margin-top: 2px;">issue 詳細頁 menu 列加「N 日前工時」連結，點擊開 mini modal 快填（取代舊 LawPJ_工時toolbar）。</div>
+              </div>
+            </label>
+            <div id="inline-toolbar-enabled-status" class="muted" style="font-size: 13px; min-height: 18px;"></div>
           </section>
 
           <div class="pj-alert-stack" id="inline-tools-alert-stack"></div>
@@ -2843,25 +2855,34 @@ function getIssueIdFromPath() {
 /* ----- 入口：boot 階段呼叫 / toggle ON 立即呼叫 ----- */
 function installInlineTools() {
   if (!isIssueDetailPage()) return;
-  // Toggle 檢查：default true 保持向後相容
-  if (Store.get("inline_tools_enabled", true) === false) return;
-  installQuickEditForm();
-  installWorktimeToolbar();
+  // 兩個獨立 toggle: quick edit form 與 worktime toolbar 各自 default true
+  if (Store.get("inline_quick_edit_enabled", true) !== false) {
+    installQuickEditForm();
+  }
+  if (Store.get("inline_toolbar_enabled", true) !== false) {
+    installWorktimeToolbar();
+  }
 }
 
-/* ----- 反向：toggle OFF 時移除已注入 DOM ----- */
-function uninstallInlineTools() {
-  // 移除 quick-edit form
+/* ----- 反向：個別 unmount ----- */
+function uninstallQuickEditForm() {
   const form = document.getElementById(INLINE_FORM_ID);
   if (form) form.remove();
-  // 移除 toolbar marker + 所有 toolbar items
+}
+
+function uninstallWorktimeToolbar() {
   const marker = document.getElementById(INLINE_TOOLBAR_ID);
   if (marker) marker.remove();
   for (const li of document.querySelectorAll('[data-worklog-inline-toolbar-item="1"]')) {
     li.remove();
   }
-  // 注意:不移除 #__worklog_inline_modal 與 toast container 因為若 modal 開啟中
-  // 移除會 race；它們留著沒副作用 (惰性使用)。
+}
+
+function uninstallInlineTools() {
+  // 全部 unmount (保留作為公用 API, 內部呼叫個別 uninstall)
+  uninstallQuickEditForm();
+  uninstallWorktimeToolbar();
+  // 注意:不移除 #__worklog_inline_modal 與 toast container (race + 惰性元素)
 }
 
 /* ----- inline toast（self-contained，因為 worklog_app.js 的 showToast 在 __initWorklogApp wrap 內取不到） ----- */
@@ -3300,6 +3321,10 @@ const INLINE_CSS = `
 
 window.__worklog_installInlineTools = installInlineTools;
 window.__worklog_uninstallInlineTools = uninstallInlineTools;
+window.__worklog_installQuickEditForm = installQuickEditForm;
+window.__worklog_uninstallQuickEditForm = uninstallQuickEditForm;
+window.__worklog_installWorktimeToolbar = installWorktimeToolbar;
+window.__worklog_uninstallWorktimeToolbar = uninstallWorktimeToolbar;
 window.__worklog_installInlineModal = installInlineModal;
 window.__worklog_inlineToast = inlineToast;
 
@@ -3309,8 +3334,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605151759";
-const APP_BUILD_TIME = "2026-05-15 17:59";
+const APP_VERSION = "1.0.202605151811";
+const APP_BUILD_TIME = "2026-05-15 18:11";
 
 const state = {
   localToday: localDateString(new Date()),
@@ -3440,8 +3465,10 @@ const elements = {
   inlineToolbarOffsetsStatus: document.getElementById("inline-toolbar-offsets-status"),
   inlineDefaultPhraseSelect: document.getElementById("inline-default-phrase-select"),
   inlineDefaultPhraseStatus: document.getElementById("inline-default-phrase-status"),
-  inlineToolsEnabledToggle: document.getElementById("inline-tools-enabled-toggle"),
-  inlineToolsEnabledStatus: document.getElementById("inline-tools-enabled-status"),
+  inlineQuickEditEnabledToggle: document.getElementById("inline-quick-edit-enabled-toggle"),
+  inlineQuickEditEnabledStatus: document.getElementById("inline-quick-edit-enabled-status"),
+  inlineToolbarEnabledToggle: document.getElementById("inline-toolbar-enabled-toggle"),
+  inlineToolbarEnabledStatus: document.getElementById("inline-toolbar-enabled-status"),
 };
 
 /* ===== Toast：短暫操作反饋 (success / error / info)，自動消失 ============== */
@@ -5396,10 +5423,14 @@ let __inlineToolsHandlersBound = false;
 function renderInlineToolsView() {
   if (!elements.inlineToolbarOffsetsInput) return;
 
-  // 0. Enabled toggle：從 Store 載入當前 checked 狀態（每次切到 view 都同步）
-  if (elements.inlineToolsEnabledToggle) {
-    const enabled = Store.get("inline_tools_enabled", true) !== false;
-    elements.inlineToolsEnabledToggle.checked = enabled;
+  // 0. Enabled toggles：從 Store 載入當前 checked 狀態（每次切到 view 都同步）
+  if (elements.inlineQuickEditEnabledToggle) {
+    const enabled = Store.get("inline_quick_edit_enabled", true) !== false;
+    elements.inlineQuickEditEnabledToggle.checked = enabled;
+  }
+  if (elements.inlineToolbarEnabledToggle) {
+    const enabled = Store.get("inline_toolbar_enabled", true) !== false;
+    elements.inlineToolbarEnabledToggle.checked = enabled;
   }
 
   // 1. Toolbar offsets：從 Store 載入
@@ -5426,22 +5457,42 @@ function renderInlineToolsView() {
   if (__inlineToolsHandlersBound) return;
   __inlineToolsHandlersBound = true;
 
-  // Toggle: persist + 立即 install/uninstall
-  if (elements.inlineToolsEnabledToggle) {
-    elements.inlineToolsEnabledToggle.addEventListener("change", () => {
-      const v = elements.inlineToolsEnabledToggle.checked;
-      Store.set("inline_tools_enabled", v);
-      const status = elements.inlineToolsEnabledStatus;
+  // Quick Edit Form toggle: persist + 立即 install/uninstall
+  if (elements.inlineQuickEditEnabledToggle) {
+    elements.inlineQuickEditEnabledToggle.addEventListener("change", () => {
+      const v = elements.inlineQuickEditEnabledToggle.checked;
+      Store.set("inline_quick_edit_enabled", v);
+      const status = elements.inlineQuickEditEnabledStatus;
       if (v) {
-        if (typeof window.__worklog_installInlineTools === "function") {
-          window.__worklog_installInlineTools();
+        if (typeof window.__worklog_installQuickEditForm === "function") {
+          window.__worklog_installQuickEditForm();
         }
         if (status) status.textContent = "已啟用：當前 issue 頁立即注入；非 issue 頁需切到 issue 頁才會看到";
       } else {
-        if (typeof window.__worklog_uninstallInlineTools === "function") {
-          window.__worklog_uninstallInlineTools();
+        if (typeof window.__worklog_uninstallQuickEditForm === "function") {
+          window.__worklog_uninstallQuickEditForm();
         }
-        if (status) status.textContent = "已停用：已移除 quick-edit form 與 toolbar items";
+        if (status) status.textContent = "已停用：已移除 quick-edit form";
+      }
+    });
+  }
+
+  // Worktime Toolbar toggle: persist + 立即 install/uninstall
+  if (elements.inlineToolbarEnabledToggle) {
+    elements.inlineToolbarEnabledToggle.addEventListener("change", () => {
+      const v = elements.inlineToolbarEnabledToggle.checked;
+      Store.set("inline_toolbar_enabled", v);
+      const status = elements.inlineToolbarEnabledStatus;
+      if (v) {
+        if (typeof window.__worklog_installWorktimeToolbar === "function") {
+          window.__worklog_installWorktimeToolbar();
+        }
+        if (status) status.textContent = "已啟用：當前 issue 頁立即注入；非 issue 頁需切到 issue 頁才會看到";
+      } else {
+        if (typeof window.__worklog_uninstallWorktimeToolbar === "function") {
+          window.__worklog_uninstallWorktimeToolbar();
+        }
+        if (status) status.textContent = "已停用：已移除 toolbar items";
       }
     });
   }
@@ -6365,6 +6416,8 @@ function boot() {
   // inline 工具改用 phrase 關聯後不再用獨立 activity / comment 設定
   Store.del('inline_default_activity_id');
   Store.del('inline_default_comment');
+  // 舊單一 toggle 已拆為 quick_edit / toolbar 兩個獨立 toggle
+  Store.del('inline_tools_enabled');
   console.log('[LawPJ Worklog] userscript 已就緒（從上方 menu 進入工時助手）');
 }
 if (document.readyState === 'loading') {

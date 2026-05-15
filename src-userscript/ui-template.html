@@ -2000,14 +2000,26 @@
           </div>
 
           <section class="add-form" style="margin-bottom: 12px;">
-            <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
-              <input type="checkbox" id="inline-tools-enabled-toggle" style="width: 18px; height: 18px; margin-top: 2px; flex-shrink: 0;">
+            <div class="settings-group-hint" style="margin-bottom: 10px;">
+              <strong>功能開關</strong>：兩個 inline 功能可以個別開關。立即生效（會移除目前頁面已注入的元素）。
+            </div>
+            <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; margin-bottom: 10px;">
+              <input type="checkbox" id="inline-quick-edit-enabled-toggle" style="width: 18px; height: 18px; margin-top: 2px; flex-shrink: 0;">
               <div style="flex: 1;">
-                <div style="font-weight: 500;">啟用 Inline 工具</div>
-                <div class="muted" style="font-size: 12px; margin-top: 2px;">關閉後 issue 詳細頁不再注入 quick-edit form 與 worktime toolbar。立即生效（會移除目前頁面已注入的元素）。</div>
+                <div style="font-weight: 500;">啟用 Quick Edit 表單</div>
+                <div class="muted" style="font-size: 12px; margin-top: 2px;">issue 詳細頁 #issue_detail_header 上方注入「預估工時 / 開始日期 / 完成日期 / 更新」表單（取代舊 PJ_起迄耗時）。</div>
               </div>
             </label>
-            <div id="inline-tools-enabled-status" class="muted" style="font-size: 13px; min-height: 18px; margin-top: 6px;"></div>
+            <div id="inline-quick-edit-enabled-status" class="muted" style="font-size: 13px; min-height: 18px; margin-bottom: 12px;"></div>
+
+            <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="inline-toolbar-enabled-toggle" style="width: 18px; height: 18px; margin-top: 2px; flex-shrink: 0;">
+              <div style="flex: 1;">
+                <div style="font-weight: 500;">啟用 Worktime Toolbar</div>
+                <div class="muted" style="font-size: 12px; margin-top: 2px;">issue 詳細頁 menu 列加「N 日前工時」連結，點擊開 mini modal 快填（取代舊 LawPJ_工時toolbar）。</div>
+              </div>
+            </label>
+            <div id="inline-toolbar-enabled-status" class="muted" style="font-size: 13px; min-height: 18px;"></div>
           </section>
 
           <div class="alert-stack" id="inline-tools-alert-stack"></div>

@@ -130,8 +130,10 @@ const elements = {
   inlineToolbarOffsetsStatus: document.getElementById("inline-toolbar-offsets-status"),
   inlineDefaultPhraseSelect: document.getElementById("inline-default-phrase-select"),
   inlineDefaultPhraseStatus: document.getElementById("inline-default-phrase-status"),
-  inlineToolsEnabledToggle: document.getElementById("inline-tools-enabled-toggle"),
-  inlineToolsEnabledStatus: document.getElementById("inline-tools-enabled-status"),
+  inlineQuickEditEnabledToggle: document.getElementById("inline-quick-edit-enabled-toggle"),
+  inlineQuickEditEnabledStatus: document.getElementById("inline-quick-edit-enabled-status"),
+  inlineToolbarEnabledToggle: document.getElementById("inline-toolbar-enabled-toggle"),
+  inlineToolbarEnabledStatus: document.getElementById("inline-toolbar-enabled-status"),
 };
 
 /* ===== Toast：短暫操作反饋 (success / error / info)，自動消失 ============== */
@@ -2093,10 +2095,14 @@ let __inlineToolsHandlersBound = false;
 function renderInlineToolsView() {
   if (!elements.inlineToolbarOffsetsInput) return;
 
-  // 0. Enabled toggle：從 Store 載入當前 checked 狀態（每次切到 view 都同步）
-  if (elements.inlineToolsEnabledToggle) {
-    const enabled = Store.get("inline_tools_enabled", true) !== false;
-    elements.inlineToolsEnabledToggle.checked = enabled;
+  // 0. Enabled toggles：從 Store 載入當前 checked 狀態（每次切到 view 都同步）
+  if (elements.inlineQuickEditEnabledToggle) {
+    const enabled = Store.get("inline_quick_edit_enabled", true) !== false;
+    elements.inlineQuickEditEnabledToggle.checked = enabled;
+  }
+  if (elements.inlineToolbarEnabledToggle) {
+    const enabled = Store.get("inline_toolbar_enabled", true) !== false;
+    elements.inlineToolbarEnabledToggle.checked = enabled;
   }
 
   // 1. Toolbar offsets：從 Store 載入
@@ -2123,22 +2129,42 @@ function renderInlineToolsView() {
   if (__inlineToolsHandlersBound) return;
   __inlineToolsHandlersBound = true;
 
-  // Toggle: persist + 立即 install/uninstall
-  if (elements.inlineToolsEnabledToggle) {
-    elements.inlineToolsEnabledToggle.addEventListener("change", () => {
-      const v = elements.inlineToolsEnabledToggle.checked;
-      Store.set("inline_tools_enabled", v);
-      const status = elements.inlineToolsEnabledStatus;
+  // Quick Edit Form toggle: persist + 立即 install/uninstall
+  if (elements.inlineQuickEditEnabledToggle) {
+    elements.inlineQuickEditEnabledToggle.addEventListener("change", () => {
+      const v = elements.inlineQuickEditEnabledToggle.checked;
+      Store.set("inline_quick_edit_enabled", v);
+      const status = elements.inlineQuickEditEnabledStatus;
       if (v) {
-        if (typeof window.__worklog_installInlineTools === "function") {
-          window.__worklog_installInlineTools();
+        if (typeof window.__worklog_installQuickEditForm === "function") {
+          window.__worklog_installQuickEditForm();
         }
         if (status) status.textContent = "已啟用：當前 issue 頁立即注入；非 issue 頁需切到 issue 頁才會看到";
       } else {
-        if (typeof window.__worklog_uninstallInlineTools === "function") {
-          window.__worklog_uninstallInlineTools();
+        if (typeof window.__worklog_uninstallQuickEditForm === "function") {
+          window.__worklog_uninstallQuickEditForm();
         }
-        if (status) status.textContent = "已停用：已移除 quick-edit form 與 toolbar items";
+        if (status) status.textContent = "已停用：已移除 quick-edit form";
+      }
+    });
+  }
+
+  // Worktime Toolbar toggle: persist + 立即 install/uninstall
+  if (elements.inlineToolbarEnabledToggle) {
+    elements.inlineToolbarEnabledToggle.addEventListener("change", () => {
+      const v = elements.inlineToolbarEnabledToggle.checked;
+      Store.set("inline_toolbar_enabled", v);
+      const status = elements.inlineToolbarEnabledStatus;
+      if (v) {
+        if (typeof window.__worklog_installWorktimeToolbar === "function") {
+          window.__worklog_installWorktimeToolbar();
+        }
+        if (status) status.textContent = "已啟用：當前 issue 頁立即注入；非 issue 頁需切到 issue 頁才會看到";
+      } else {
+        if (typeof window.__worklog_uninstallWorktimeToolbar === "function") {
+          window.__worklog_uninstallWorktimeToolbar();
+        }
+        if (status) status.textContent = "已停用：已移除 toolbar items";
       }
     });
   }
