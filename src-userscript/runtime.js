@@ -385,6 +385,36 @@ const handlers = {
     return {};
   },
 
+  // Per-issue default template snapshots (inline {hours, activity_id, comments})
+  // 對映「⭐ 設為此 issue 的 default」功能。snapshot 而非 phrase_id reference,
+  // 所以 phrase 刪除/改變不影響已設的 default。
+  "GET /api/issue-template-defaults"() {
+    return { defaults: Store.get("issue_template_defaults", {}) };
+  },
+
+  "PUT /api/issue-template-defaults"(_params, body, pathRest) {
+    const issueId = String(pathRest || "").trim();
+    if (!issueId) throw new Error("缺少 issue_id");
+    const snap = {
+      hours: String((body && body.hours) || ""),
+      activity_id: String((body && body.activity_id) || ""),
+      comments: String((body && body.comments) || ""),
+    };
+    const map = Store.get("issue_template_defaults", {});
+    map[issueId] = snap;
+    Store.set("issue_template_defaults", map);
+    return { issue_id: issueId, snapshot: snap };
+  },
+
+  "DELETE /api/issue-template-defaults"(_params, _body, pathRest) {
+    const issueId = String(pathRest || "").trim();
+    if (!issueId) throw new Error("缺少 issue_id");
+    const map = Store.get("issue_template_defaults", {});
+    delete map[issueId];
+    Store.set("issue_template_defaults", map);
+    return { issue_id: issueId };
+  },
+
   async "POST /api/issues/batch-create"(_params, body) {
     const projectId = Number(body && body.project_id);
     const trackerId = Number(body && body.tracker_id);
@@ -631,7 +661,7 @@ async function fetchJsonAdapter(url, options = {}) {
   if (handlers[matchKey]) {
     return handlers[matchKey](params, body);
   }
-  for (const prefix of ["/api/phrases/", "/api/saved-queries/", "/api/issue-templates/"]) {
+  for (const prefix of ["/api/phrases/", "/api/saved-queries/", "/api/issue-templates/", "/api/issue-template-defaults/"]) {
     if (pathname.startsWith(prefix)) {
       const basePath = prefix.replace(/\/$/, "");
       const rest = pathname.slice(prefix.length);

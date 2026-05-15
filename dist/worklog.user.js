@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605141004
+// @version      1.0.202605151453
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -1279,19 +1279,86 @@ const APP_CSS = `#__worklog_root {
       }#__worklog_root .pj-entry-title-row {
         display: flex; align-items: center;
         gap: 10px; justify-content: space-between;
-      }#__worklog_root .pj-entry-title-text { flex: 1; min-width: 0; }#__worklog_root .pj-entry-phrase-select {
+      }#__worklog_root .pj-entry-title-text { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 6px; }#__worklog_root .pj-entry-default-star {
+        color: var(--accent);
+        font-size: 13px;
+        cursor: help;
+        opacity: 0.85;
+      }#__worklog_root .pj-entry-default-star:hover { opacity: 1; }#__worklog_root .pj-phrase-menu-wrap {
+        position: relative;
+        display: inline-block;
         flex-shrink: 0;
-        width: auto;
-        max-width: 180px;
+      }#__worklog_root .pj-phrase-menu-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
         height: 32px;
-        font-size: 12px;
-        padding: 0 8px;
+        padding: 0 10px;
         border: 1px solid var(--panel-border);
         border-radius: 6px;
         background: var(--panel);
         color: var(--ink);
+        font-size: 12px;
         cursor: pointer;
-      }@media (max-width: 767px) {#__worklog_root .pj-entry-phrase-select { max-width: 140px; }
+        transition: background 120ms, border-color 120ms;
+      }#__worklog_root .pj-phrase-menu-button:hover { background: var(--subtle); border-color: var(--muted); }#__worklog_root .pj-phrase-menu-button[aria-expanded="true"] {
+        background: var(--accent-soft);
+        border-color: var(--accent);
+      }#__worklog_root .pj-phrase-menu-arrow { font-size: 9px; color: var(--muted); margin-left: 2px; }#__worklog_root .pj-phrase-menu-popup {
+        position: absolute;
+        top: calc(100% + 4px);
+        right: 0;
+        min-width: 240px;
+        max-width: 320px;
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 8px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+        z-index: 30;
+        padding: 4px 0;
+        animation: phrase-menu-in 120ms ease-out;
+      }
+      @keyframes phrase-menu-in {
+        from { opacity: 0; transform: translateY(-4px); }
+        to { opacity: 1; transform: translateY(0); }
+      }#__worklog_root .pj-phrase-menu-section-label {
+        padding: 4px 12px;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: var(--muted);
+      }#__worklog_root .pj-phrase-menu-item {
+        display: block;
+        width: 100%;
+        padding: 8px 12px;
+        border: 0;
+        background: transparent;
+        color: var(--ink);
+        font-size: 13px;
+        text-align: left;
+        cursor: pointer;
+        transition: background 80ms;
+      }#__worklog_root .pj-phrase-menu-item:hover, #__worklog_root .pj-phrase-menu-item:focus-visible {
+        background: var(--accent-soft);
+        outline: none;
+      }#__worklog_root .pj-phrase-menu-item small {
+        display: block;
+        font-size: 11px;
+        color: var(--muted);
+        margin-top: 2px;
+      }#__worklog_root .pj-phrase-menu-empty {
+        padding: 10px 12px;
+        font-size: 12px;
+        color: var(--muted);
+        font-style: italic;
+      }#__worklog_root .pj-phrase-menu-divider {
+        height: 1px;
+        background: var(--panel-border);
+        margin: 4px 0;
+      }#__worklog_root .pj-phrase-menu-default-toggle {
+        color: var(--accent);
+        font-weight: 500;
+      }@media (max-width: 767px) {#__worklog_root .pj-phrase-menu-button { padding: 0 8px; font-size: 11px; }#__worklog_root .pj-phrase-menu-popup { min-width: 200px; max-width: calc(100vw - 32px); }
       }#__worklog_root .pj-settings-section {
         border: 1px solid var(--panel-border);
         border-radius: 10px;
@@ -1852,6 +1919,36 @@ const handlers = {
     return {};
   },
 
+  // Per-issue default template snapshots (inline {hours, activity_id, comments})
+  // 對映「⭐ 設為此 issue 的 default」功能。snapshot 而非 phrase_id reference,
+  // 所以 phrase 刪除/改變不影響已設的 default。
+  "GET /api/issue-template-defaults"() {
+    return { defaults: Store.get("issue_template_defaults", {}) };
+  },
+
+  "PUT /api/issue-template-defaults"(_params, body, pathRest) {
+    const issueId = String(pathRest || "").trim();
+    if (!issueId) throw new Error("缺少 issue_id");
+    const snap = {
+      hours: String((body && body.hours) || ""),
+      activity_id: String((body && body.activity_id) || ""),
+      comments: String((body && body.comments) || ""),
+    };
+    const map = Store.get("issue_template_defaults", {});
+    map[issueId] = snap;
+    Store.set("issue_template_defaults", map);
+    return { issue_id: issueId, snapshot: snap };
+  },
+
+  "DELETE /api/issue-template-defaults"(_params, _body, pathRest) {
+    const issueId = String(pathRest || "").trim();
+    if (!issueId) throw new Error("缺少 issue_id");
+    const map = Store.get("issue_template_defaults", {});
+    delete map[issueId];
+    Store.set("issue_template_defaults", map);
+    return { issue_id: issueId };
+  },
+
   async "POST /api/issues/batch-create"(_params, body) {
     const projectId = Number(body && body.project_id);
     const trackerId = Number(body && body.tracker_id);
@@ -2098,7 +2195,7 @@ async function fetchJsonAdapter(url, options = {}) {
   if (handlers[matchKey]) {
     return handlers[matchKey](params, body);
   }
-  for (const prefix of ["/api/phrases/", "/api/saved-queries/", "/api/issue-templates/"]) {
+  for (const prefix of ["/api/phrases/", "/api/saved-queries/", "/api/issue-templates/", "/api/issue-template-defaults/"]) {
     if (pathname.startsWith(prefix)) {
       const basePath = prefix.replace(/\/$/, "");
       const rest = pathname.slice(prefix.length);
@@ -2683,8 +2780,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605141004";
-const APP_BUILD_TIME = "2026-05-14 10:04";
+const APP_VERSION = "1.0.202605151453";
+const APP_BUILD_TIME = "2026-05-15 14:53";
 
 const state = {
   localToday: localDateString(new Date()),
@@ -2720,6 +2817,8 @@ const state = {
   phrases: [],
   phrasesWarnings: [],
   sourcesWarnings: [],
+  issueTemplateDefaults: {},  // { [issue_id]: { hours, activity_id, comments } } inline snapshot
+  openPhraseMenuFor: null,    // 目前打開哪個 entry 的 phrase menu (issue_id 或 null)
   batchSpentOn: "",
   settingsOpen: false,
   settingsTab: "appearance",
@@ -3053,6 +3152,12 @@ function upsertDraftEntry(issueId) {
   const existingIndex = state.draftEntries.findIndex((entry) => entry.issue_id === issueId);
   const existing = existingIndex >= 0 ? state.draftEntries[existingIndex] : null;
   const nextEntry = buildDraftEntry(issueId, existing);
+  // D5 guard: 只在 new entry 套用 default (snapshot)。Existing entry re-upsert
+  // 保留 user 既有 fields (含手動修改)，避免 select-all 覆蓋手改值。
+  if (existingIndex < 0) {
+    const snap = state.issueTemplateDefaults[issueId];
+    if (snap) applyPhraseFields(snap, nextEntry);
+  }
   if (existingIndex >= 0) {
     state.draftEntries[existingIndex] = nextEntry;
   } else {
@@ -3117,6 +3222,11 @@ async function fetchPhrases() {
 async function fetchIssueTemplates() {
   const data = await fetchJson("/api/issue-templates");
   state.issueTemplates = data.templates || [];
+}
+
+async function fetchIssueTemplateDefaults() {
+  const data = await fetchJson("/api/issue-template-defaults");
+  state.issueTemplateDefaults = data.defaults || {};
 }
 
 async function fetchProjects() {
@@ -3491,13 +3601,14 @@ function renderRow(entry) {
     )
     .join("");
   const isFocused = lastFocusedEntryId === entry.issue_id;
+  const hasDefault = !!state.issueTemplateDefaults[entry.issue_id];
+  const menuOpen = state.openPhraseMenuFor === entry.issue_id;
 
-  const phraseOptions = state.phrases.length
-    ? `<select class="pj-entry-phrase-select" data-apply-phrase-select data-issue-id="${entry.issue_id}" title="快速填入此筆">
-         <option value="">快速填入...</option>
-         ${state.phrases.map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.label || "(未命名)")}</option>`).join("")}
-       </select>`
+  const defaultStar = hasDefault
+    ? `<span class="pj-entry-default-star" title="此 issue 已設 default — 勾入時自動套用">⭐</span>`
     : "";
+
+  const phraseOptions = renderPhraseMenu(entry.issue_id, menuOpen, hasDefault);
 
   return `
     <tbody data-entry-row="${entry.issue_id}" class="${isFocused ? "pj-row-focused" : ""}">
@@ -3506,6 +3617,7 @@ function renderRow(entry) {
           <div class="pj-entry-title-row">
             <div class="pj-entry-title-text">
               <span class="pj-entry-issue-id">#${entry.issue_id}</span>
+              ${defaultStar}
               <span class="pj-entry-issue-label">${escapeHtml(issueLabel)}</span>
               ${entry.issue_url ? `<a class="pj-entry-issue-link" href="${escapeHtml(entry.issue_url)}" target="_blank" rel="noreferrer">↗</a>` : ""}
             </div>
@@ -3562,18 +3674,41 @@ function bindTableEvents() {
     });
   }
 
-  for (const select of elements.tableWrap.querySelectorAll("[data-apply-phrase-select]")) {
-    select.addEventListener("change", (event) => {
-      const phraseId = event.target.value;
-      if (!phraseId) return;
-      const issueId = Number(event.target.dataset.issueId);
+  // Phrase menu: toggle popup open/close
+  for (const btn of elements.tableWrap.querySelectorAll("[data-phrase-menu-toggle]")) {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const issueId = Number(event.currentTarget.dataset.issueId);
+      state.openPhraseMenuFor = state.openPhraseMenuFor === issueId ? null : issueId;
+      renderAll();
+    });
+  }
+  // Phrase menu: apply phrase item
+  for (const btn of elements.tableWrap.querySelectorAll("[data-phrase-apply]")) {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const phraseId = event.currentTarget.dataset.phraseApply;
+      const issueId = Number(event.currentTarget.dataset.issueId);
       const entry = state.draftEntries.find((item) => item.issue_id === issueId);
       const phrase = state.phrases.find((p) => p.id === phraseId);
       if (!entry || !phrase) return;
       applyPhraseFields(phrase, entry);
-      clearEntryPreviewState(entry);
       invalidatePreview(true);
-      event.target.value = "";
+      state.openPhraseMenuFor = null;
+      renderAll();
+    });
+  }
+  // Phrase menu: toggle default (set / remove)
+  for (const btn of elements.tableWrap.querySelectorAll("[data-toggle-default]")) {
+    btn.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const issueId = Number(event.currentTarget.dataset.issueId);
+      state.openPhraseMenuFor = null;
+      try {
+        await toggleIssueDefault(issueId);
+      } catch (err) {
+        showToast("操作失敗：" + (err.message || String(err)), { type: "error" });
+      }
       renderAll();
     });
   }
@@ -4309,6 +4444,48 @@ function renderScheduleGantt() {
   return `<div class="pj-gantt-days">${dayCards}</div>`;
 }
 
+// Plain-text 摘要給 dropdown menu item 用 (避免 HTML chips 在 button 內巢狀)
+function phrasePresetSummary(phrase) {
+  const parts = [];
+  if (phrase.hours) parts.push(`${phrase.hours}h`);
+  if (phrase.activity_id) {
+    const activity = state.activities.find((a) => String(a.id) === String(phrase.activity_id));
+    parts.push(activity ? activity.name : `activity ${phrase.activity_id}`);
+  }
+  if (phrase.comments) parts.push("有備註");
+  return parts.join(" · ");
+}
+
+function renderPhraseMenu(issueId, isOpen, hasDefault) {
+  const buttonAttrs = `data-phrase-menu-toggle data-issue-id="${issueId}" aria-haspopup="true" aria-expanded="${isOpen}"`;
+  const popup = isOpen ? `
+    <div class="pj-phrase-menu-popup" role="menu" data-phrase-menu-popup data-issue-id="${issueId}">
+      ${state.phrases.length ? `
+        <div class="pj-phrase-menu-section-label">套用模板</div>
+        ${state.phrases.map((p) => `
+          <button class="pj-phrase-menu-item" role="menuitem" type="button" data-phrase-apply="${escapeHtml(p.id)}" data-issue-id="${issueId}">
+            ${escapeHtml(p.label || "(未命名)")}
+            ${phrasePresetSummary(p) ? `<small>${escapeHtml(phrasePresetSummary(p))}</small>` : ""}
+          </button>
+        `).join("")}
+        <div class="pj-phrase-menu-divider"></div>
+      ` : `<div class="pj-phrase-menu-empty">尚未建立工時模板 — 在「工時模板」view 新增</div>`}
+      <button class="pj-phrase-menu-item pj-phrase-menu-default-toggle" role="menuitem" type="button" data-toggle-default data-issue-id="${issueId}">
+        ${hasDefault ? "⭐ 移除此 issue 的 default" : "⭐ 用目前值設為此 issue 的 default"}
+      </button>
+    </div>
+  ` : "";
+  return `
+    <div class="pj-phrase-menu-wrap" data-phrase-menu data-issue-id="${issueId}">
+      <button class="pj-phrase-menu-button" type="button" ${buttonAttrs} title="快速填入或設 default">
+        <span class="phrase-menu-label">快速填入</span>
+        <span class="pj-phrase-menu-arrow" aria-hidden="true">▾</span>
+      </button>
+      ${popup}
+    </div>
+  `;
+}
+
 function phrasePresetLabel(phrase) {
   const chips = [];
   if (phrase.hours) chips.push(`<span class="pj-preset-chip">${escapeHtml(phrase.hours)}h</span>`);
@@ -4427,11 +4604,45 @@ function resetPhraseForm() {
   elements.phraseCancelButton.style.display = "none";
 }
 
-function applyPhraseFields(phrase, entry) {
-  if (phrase.hours) entry.hours = phrase.hours;
-  if (phrase.activity_id) entry.activity_id = phrase.activity_id;
-  if (phrase.comments) entry.comments = phrase.comments;
+// fields 可為 phrase 物件 ({id, label, hours, activity_id, comments}) 或
+// inline snapshot ({hours, activity_id, comments}) — 只讀三個欄位，duck-typed。
+function applyPhraseFields(fields, entry) {
+  if (fields.hours) entry.hours = fields.hours;
+  if (fields.activity_id) entry.activity_id = fields.activity_id;
+  if (fields.comments) entry.comments = fields.comments;
   clearEntryPreviewState(entry);
+}
+
+// Toggle per-issue default：有就刪、沒就用 entry 當下 hours/activity/comments 設定快照。
+async function toggleIssueDefault(issueId) {
+  const existing = state.issueTemplateDefaults[issueId];
+  if (existing) {
+    await fetchJson(`/api/issue-template-defaults/${encodeURIComponent(issueId)}`, { method: "DELETE" });
+    delete state.issueTemplateDefaults[issueId];
+    showToast("已移除此 issue 的 default");
+    return;
+  }
+  const entry = state.draftEntries.find((item) => item.issue_id === issueId);
+  if (!entry) {
+    showToast("找不到對應 entry，無法設 default", { type: "error" });
+    return;
+  }
+  const snap = {
+    hours: entry.hours || "",
+    activity_id: entry.activity_id || "",
+    comments: entry.comments || "",
+  };
+  if (!snap.hours && !snap.activity_id && !snap.comments) {
+    showToast("entry 尚未填值，無法設為 default", { type: "error" });
+    return;
+  }
+  const data = await fetchJson(`/api/issue-template-defaults/${encodeURIComponent(issueId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(snap),
+  });
+  state.issueTemplateDefaults[issueId] = data.snapshot || snap;
+  showToast("已設為此 issue 的 default — 下次勾入會自動套用");
 }
 
 function renderSourcesDrawer() {
@@ -5163,7 +5374,7 @@ async function initializeApp() {
   }
   updateAboutInfo();
   await withLoading("初始化中...", async () => {
-    await Promise.all([fetchActivities(), fetchSavedQueries(), fetchPhrases(), fetchIssueTemplates()]);
+    await Promise.all([fetchActivities(), fetchSavedQueries(), fetchPhrases(), fetchIssueTemplates(), fetchIssueTemplateDefaults()]);
     if (
       state.currentSource.type === "query" &&
       !state.savedQueries.some((q) => q.query_id === state.currentSource.id)
@@ -5182,6 +5393,20 @@ elements.refreshButton.addEventListener("click", async () => {
     renderAll();
   } catch (error) {
     state.issueWarnings = [error.message || String(error)];
+    renderAll();
+  }
+});
+
+// Phrase menu: 點外部關閉 + ESC 關閉 (全域 listener 註冊一次)
+document.addEventListener("click", (event) => {
+  if (state.openPhraseMenuFor === null) return;
+  if (event.target.closest && event.target.closest("[data-phrase-menu]")) return;
+  state.openPhraseMenuFor = null;
+  renderAll();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.openPhraseMenuFor !== null) {
+    state.openPhraseMenuFor = null;
     renderAll();
   }
 });
