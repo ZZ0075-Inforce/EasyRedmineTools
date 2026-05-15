@@ -394,6 +394,7 @@ def main() -> None:
     settings_js = read(SRC / "settings-patch.js")
     overlay_js = read(SRC / "overlay.js")
     menu_injector_js = read(SRC / "menu-injector.js")
+    inline_injector_js = read(SRC / "inline-injector.js")
     ui_html = read(SRC / "ui-template.html")
     app_js = read(ROOT / "worklog_app.js")
 
@@ -412,6 +413,7 @@ def main() -> None:
     settings_js = prefix_classes(settings_js, app_classes)
     runtime_js = prefix_classes(runtime_js, app_classes)
     menu_injector_js = prefix_classes(menu_injector_js, app_classes)
+    inline_injector_js = prefix_classes(inline_injector_js, app_classes)
 
     # 把 worklog_app.js 內 APP_VERSION / APP_BUILD_TIME 替換為本次 build 時間戳
     # 讓設定→關於 顯示的版號跟 @version metadata 同步
@@ -453,6 +455,8 @@ def main() -> None:
         "",
         menu_injector_js,
         "",
+        inline_injector_js,
+        "",
         wrapped_app,
         "",
         "/* ===== Bootstrap =============================== */",
@@ -462,6 +466,9 @@ def main() -> None:
         "    // 若 #top-menu-container 還沒就緒就稍等再試（Redmine 偶爾延遲）",
         "    setTimeout(injectTopMenu, 500);",
         "  }",
+        "  // Inline 工具（整合自舊 PJ_startToEndDate + PJ_workingHours）",
+        "  installInlineModal();  // 預先 inject mini modal 到 body（toolbar 點擊時用）",
+        "  installInlineTools();  // 若當前是 /issues/{id} 詳細頁就 inject form + toolbar",
         "  recordIssueVisit().catch(() => {});",
         "  // 一次性清掉舊浮動按鈕位置殘留（已 deprecated）",
         "  Store.del('launcher_pos');",
