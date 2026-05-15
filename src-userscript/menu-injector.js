@@ -9,6 +9,7 @@ const SIDE_VIEWS = [
   { key: "phrases",         icon: "✏️", iconClass: "icon icon-edit",   label: "工時模板" },
   { key: "sources",         icon: "🔍", iconClass: "icon icon-filter", label: "PJ 篩選器" },
   { key: "issue-batch",     icon: "➕", iconClass: "icon icon-add",    label: "批次建 issue" },
+  { key: "inline-tools",    icon: "⚡", iconClass: "icon icon-settings", label: "Inline 工具" },
 ];
 window.__worklog_SIDE_VIEWS = SIDE_VIEWS;
 

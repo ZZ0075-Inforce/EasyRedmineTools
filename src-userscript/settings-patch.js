@@ -137,12 +137,6 @@ function applySettingsPatches(root) {
       const offsetOptions = offsetLabels
         .map((label, i) => `<option value="${i}" ${i === curOffset ? "selected" : ""}>${label}</option>`)
         .join("");
-      // Inline 工具設定值
-      let inlineOffsets = Store.get("inline_toolbar_offsets", [0, 1, 3]);
-      if (!Array.isArray(inlineOffsets)) inlineOffsets = [0, 1, 3];
-      const inlineOffsetsCsv = inlineOffsets.join(",");
-      const inlineDefaultActivityId = String(Store.get("inline_default_activity_id", ""));
-      const inlineDefaultComment = String(Store.get("inline_default_comment", ""));
       return `
         <div class="settings-group-hint">「填寫工時」相關預設值。</div>
         <label class="field-stack">
@@ -165,41 +159,9 @@ function applySettingsPatches(root) {
           <span class="muted">每次開啟「填寫工時」預帶的工時日期。改完下次開啟生效（不會覆蓋目前正在編輯的日期）。</span>
         </label>
         <div id="default-spent-on-offset-status" class="muted" style="font-size:13px; min-height:18px; margin-top:6px;"></div>
-
-        <div class="settings-group-hint" style="margin-top:24px; padding-top:14px; border-top:1px solid var(--panel-border);">
-          <strong>Inline 工具</strong>（issue 詳細頁直接填工時，整合自舊 PJ_workingHours）
-        </div>
-        <label class="field-stack" style="margin-top:10px;">
-          <span>Toolbar 顯示天數偏移（用逗號分隔）</span>
-          <input type="text" id="setting-inline-toolbar-offsets" value="${inlineOffsetsCsv}" placeholder="0,1,3">
-          <span class="muted">0=今日, 1=昨日, 2=前天, ..., 預設 0,1,3。issue 詳細頁的「今日工時」按鈕對應這些 offset。</span>
-        </label>
-        <div id="inline-toolbar-offsets-status" class="muted" style="font-size:13px; min-height:18px; margin-top:6px;"></div>
-
-        <label class="field-stack" style="margin-top:18px;">
-          <span>Inline mini modal 預設活動</span>
-          <select id="setting-inline-default-activity-id" data-current="${inlineDefaultActivityId}">
-            <option value="">(載入中...)</option>
-          </select>
-          <span class="muted">點 toolbar 按鈕開的 mini modal 預填的 activity。下次開 modal 生效。</span>
-        </label>
-        <div id="inline-default-activity-id-status" class="muted" style="font-size:13px; min-height:18px; margin-top:6px;"></div>
-
-        <label class="field-stack" style="margin-top:18px;">
-          <span>Inline mini modal 預設備註</span>
-          <input type="text" id="setting-inline-default-comment" value="${escapeAttr(inlineDefaultComment)}" placeholder="例：系統開發">
-          <span class="muted">點 toolbar 按鈕開的 mini modal 預填的備註文字。下次開 modal 生效。</span>
-        </label>
-        <div id="inline-default-comment-status" class="muted" style="font-size:13px; min-height:18px; margin-top:6px;"></div>
       `;
     }
     return `<div class="settings-group-hint">本功能尚無可設定的預設值，未來會陸續加入。</div>`;
-  }
-
-  function escapeAttr(s) {
-    return String(s).replace(/[&<>"']/g, (c) => ({
-      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
-    })[c]);
   }
 
   const appearanceTabEl = tabBar.querySelector('[data-settings-tab="appearance"]');
@@ -273,76 +235,6 @@ function applySettingsPatches(root) {
       const label = labels[v] || `${v} 天前`;
       if (offsetStatus) offsetStatus.textContent = `已儲存：預設「${label}」（下次開啟生效）`;
     });
-  }
-
-  // worklog tab：inline toolbar offsets CSV
-  const inlineOffsetsInput = body.querySelector("#setting-inline-toolbar-offsets");
-  const inlineOffsetsStatus = body.querySelector("#inline-toolbar-offsets-status");
-  if (inlineOffsetsInput) {
-    const persistInlineOffsets = () => {
-      const raw = inlineOffsetsInput.value || "";
-      const parts = raw.split(",")
-        .map((s) => s.trim())
-        .filter((s) => s !== "")
-        .map((s) => Number(s))
-        .filter((n) => Number.isFinite(n) && n >= 0 && n <= 30)
-        .map((n) => Math.floor(n));
-      const deduped = Array.from(new Set(parts));
-      if (!deduped.length) {
-        if (inlineOffsetsStatus) inlineOffsetsStatus.textContent = "格式錯誤或全部無效，未儲存（請用 0,1,3 這種格式）";
-        return;
-      }
-      Store.set("inline_toolbar_offsets", deduped);
-      inlineOffsetsInput.value = deduped.join(",");
-      if (inlineOffsetsStatus) inlineOffsetsStatus.textContent = `已儲存：[${deduped.join(",")}]（下次重新整理 issue 頁生效）`;
-    };
-    inlineOffsetsInput.addEventListener("change", persistInlineOffsets);
-    inlineOffsetsInput.addEventListener("blur", persistInlineOffsets);
-  }
-
-  // worklog tab：inline default activity（async 載入 activities）
-  const inlineActivitySelect = body.querySelector("#setting-inline-default-activity-id");
-  const inlineActivityStatus = body.querySelector("#inline-default-activity-id-status");
-  if (inlineActivitySelect) {
-    (async () => {
-      try {
-        const data = await window.__worklog_redmineFetch("/enumerations/time_entry_activities.json");
-        const activities = (data && data.time_entry_activities) || [];
-        const current = inlineActivitySelect.dataset.current || "";
-        inlineActivitySelect.innerHTML = `<option value="">(未指定 — 不預填)</option>` +
-          activities.map((a) =>
-            `<option value="${a.id}" ${String(a.id) === current ? "selected" : ""}>${escapeAttr(a.name)}</option>`
-          ).join("");
-      } catch (err) {
-        inlineActivitySelect.innerHTML = `<option value="">(載入失敗：${escapeAttr(err.message || String(err))})</option>`;
-      }
-    })();
-    inlineActivitySelect.addEventListener("change", () => {
-      const v = inlineActivitySelect.value || "";
-      if (v) Store.set("inline_default_activity_id", v);
-      else Store.del("inline_default_activity_id");
-      if (inlineActivityStatus) {
-        const opt = inlineActivitySelect.options[inlineActivitySelect.selectedIndex];
-        const label = opt ? opt.textContent : v;
-        inlineActivityStatus.textContent = v ? `已儲存：${label}（下次開 mini modal 生效）` : "已清除（不預填活動）";
-      }
-    });
-  }
-
-  // worklog tab：inline default comment
-  const inlineCommentInput = body.querySelector("#setting-inline-default-comment");
-  const inlineCommentStatus = body.querySelector("#inline-default-comment-status");
-  if (inlineCommentInput) {
-    const persistInlineComment = () => {
-      const v = inlineCommentInput.value || "";
-      if (v.trim()) Store.set("inline_default_comment", v);
-      else Store.del("inline_default_comment");
-      if (inlineCommentStatus) {
-        inlineCommentStatus.textContent = v.trim() ? `已儲存（下次開 mini modal 生效）` : "已清除（不預填備註）";
-      }
-    };
-    inlineCommentInput.addEventListener("change", persistInlineComment);
-    inlineCommentInput.addEventListener("blur", persistInlineComment);
   }
 
   // tab 切換 click 由既有 worklog_app.js 的 [data-settings-tab] querySelectorAll

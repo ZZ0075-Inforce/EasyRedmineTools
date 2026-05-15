@@ -126,6 +126,10 @@ const elements = {
   batchResultsList: document.getElementById("batch-results-list"),
   phrasesAlertStack: document.getElementById("phrases-alert-stack"),
   sourcesAlertStack: document.getElementById("sources-alert-stack"),
+  inlineToolbarOffsetsInput: document.getElementById("inline-toolbar-offsets-input"),
+  inlineToolbarOffsetsStatus: document.getElementById("inline-toolbar-offsets-status"),
+  inlineDefaultPhraseSelect: document.getElementById("inline-default-phrase-select"),
+  inlineDefaultPhraseStatus: document.getElementById("inline-default-phrase-status"),
 };
 
 /* ===== Toast：短暫操作反饋 (success / error / info)，自動消失 ============== */
@@ -2004,6 +2008,7 @@ function renderAll() {
   renderAlerts();
   renderTable();
   if (state.sideView === "phrases") renderPhrasesDrawer();
+  if (state.sideView === "inline-tools") renderInlineToolsView();
   if (state.sideView === "sources") renderSourcesDrawer();
   if (state.sideView === "issue-batch") renderIssueBatchView();
   renderLoadingMask();
@@ -2078,6 +2083,72 @@ async function deleteIssueTemplateById(id) {
   await fetchJson(`/api/issue-templates/${encodeURIComponent(id)}`, { method: "DELETE" });
   state.issueTemplates = state.issueTemplates.filter((t) => t.id !== id);
   state.batchSelectedTemplateIds.delete(id);
+}
+
+/* ===== Inline 工具 view（toolbar offsets + 預設工時模板） ================= */
+let __inlineToolsHandlersBound = false;
+
+function renderInlineToolsView() {
+  if (!elements.inlineToolbarOffsetsInput) return;
+
+  // 1. Toolbar offsets：從 Store 載入
+  let offsets = Store.get("inline_toolbar_offsets", [0, 1, 3]);
+  if (!Array.isArray(offsets)) offsets = [0, 1, 3];
+  elements.inlineToolbarOffsetsInput.value = offsets.join(",");
+
+  // 2. Phrase select：列出 state.phrases，selected based on Store
+  const currentPhraseId = String(Store.get("inline_default_phrase_id", ""));
+  const phrasesHtml = [`<option value="">(無 — 不預填，每次手動填)</option>`]
+    .concat(
+      state.phrases.map((p) => {
+        const label = p.label || `(未命名 - ${p.id.slice(0, 6)})`;
+        const summary = phrasePresetSummary(p);
+        const display = summary ? `${label}  ·  ${summary}` : label;
+        const selected = p.id === currentPhraseId ? " selected" : "";
+        return `<option value="${escapeHtml(p.id)}"${selected}>${escapeHtml(display)}</option>`;
+      })
+    )
+    .join("");
+  elements.inlineDefaultPhraseSelect.innerHTML = phrasesHtml;
+
+  // 3. 綁定 handlers (只綁一次)
+  if (__inlineToolsHandlersBound) return;
+  __inlineToolsHandlersBound = true;
+
+  const persistOffsets = () => {
+    const raw = elements.inlineToolbarOffsetsInput.value || "";
+    const parts = raw.split(",")
+      .map((s) => s.trim())
+      .filter((s) => s !== "")
+      .map((s) => Number(s))
+      .filter((n) => Number.isFinite(n) && n >= 0 && n <= 30)
+      .map((n) => Math.floor(n));
+    const deduped = Array.from(new Set(parts));
+    const status = elements.inlineToolbarOffsetsStatus;
+    if (!deduped.length) {
+      if (status) status.textContent = "格式錯誤或全部無效，未儲存（請用 0,1,3 這種格式）";
+      return;
+    }
+    Store.set("inline_toolbar_offsets", deduped);
+    elements.inlineToolbarOffsetsInput.value = deduped.join(",");
+    if (status) status.textContent = `已儲存：[${deduped.join(",")}]（下次重新整理 issue 頁生效）`;
+  };
+  elements.inlineToolbarOffsetsInput.addEventListener("change", persistOffsets);
+  elements.inlineToolbarOffsetsInput.addEventListener("blur", persistOffsets);
+
+  elements.inlineDefaultPhraseSelect.addEventListener("change", () => {
+    const v = elements.inlineDefaultPhraseSelect.value || "";
+    const status = elements.inlineDefaultPhraseStatus;
+    if (v) {
+      Store.set("inline_default_phrase_id", v);
+      const phrase = state.phrases.find((p) => p.id === v);
+      const name = phrase?.label || "(未命名模板)";
+      if (status) status.textContent = `已儲存：預設套用「${name}」（下次開 mini modal 生效）`;
+    } else {
+      Store.del("inline_default_phrase_id");
+      if (status) status.textContent = "已清除（不預填，每次手動填）";
+    }
+  });
 }
 
 function renderIssueBatchView() {

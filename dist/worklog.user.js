@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605151622
+// @version      1.0.202605151703
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -258,6 +258,43 @@ const APP_HTML = `<div class="pj-app-shell">
           <div class="pj-drawer-list" id="batch-results-list"></div>
         </article>
       </div><!-- /pj-main-view issue-batch -->
+
+      <div class="pj-main-view" data-view="inline-tools" hidden>
+        <article class="panel pj-main-card-view">
+          <div class="pj-view-head">
+            <h2 class="pj-view-title">⚡ Inline 工具</h2>
+            <p class="muted">issue 詳細頁直接快填工時 / 更新起迄日。整合自舊 PJ_workingHours + PJ_startToEndDate 兩個 userscript。設定改完下次重新整理 issue 頁生效。</p>
+          </div>
+
+          <div class="pj-alert-stack" id="inline-tools-alert-stack"></div>
+
+          <section class="pj-add-form">
+            <div class="pj-settings-group-hint">
+              <strong>Toolbar 按鈕</strong>：issue 詳細頁的 menu 列會顯示這些「N 日前工時」連結，點擊開啟快填 mini modal。
+            </div>
+            <label class="pj-field-stack">
+              <span>顯示天數偏移（用逗號分隔）</span>
+              <input type="text" id="inline-toolbar-offsets-input" placeholder="0,1,3">
+              <span class="muted">0=今日, 1=昨日, 2=前天, ..., 預設 0,1,3。下次重新整理 issue 頁生效。</span>
+            </label>
+            <div id="inline-toolbar-offsets-status" class="muted" style="font-size:13px; min-height:18px; margin-top:6px;"></div>
+          </section>
+
+          <section class="pj-add-form" style="margin-top: 16px;">
+            <div class="pj-settings-group-hint">
+              <strong>Mini modal 預設工時模板</strong>：點 toolbar 按鈕開的 modal 自動套用此模板的「時數 / 活動 / 備註」。Modal 內可即時切換別的模板。
+            </div>
+            <label class="pj-field-stack">
+              <span>選擇預設工時模板</span>
+              <select id="inline-default-phrase-select">
+                <option value="">(無 — 不預填，每次手動填)</option>
+              </select>
+              <span class="muted">下拉列出的是「工時模板」view 內建立的模板。沒模板可先去那邊建。</span>
+            </label>
+            <div id="inline-default-phrase-status" class="muted" style="font-size:13px; min-height:18px; margin-top:6px;"></div>
+          </section>
+        </article>
+      </div><!-- /pj-main-view inline-tools -->
     </div>
     </div>
 
@@ -2352,12 +2389,6 @@ function applySettingsPatches(root) {
       const offsetOptions = offsetLabels
         .map((label, i) => `<option value="${i}" ${i === curOffset ? "selected" : ""}>${label}</option>`)
         .join("");
-      // Inline 工具設定值
-      let inlineOffsets = Store.get("inline_toolbar_offsets", [0, 1, 3]);
-      if (!Array.isArray(inlineOffsets)) inlineOffsets = [0, 1, 3];
-      const inlineOffsetsCsv = inlineOffsets.join(",");
-      const inlineDefaultActivityId = String(Store.get("inline_default_activity_id", ""));
-      const inlineDefaultComment = String(Store.get("inline_default_comment", ""));
       return `
         <div class="pj-settings-group-hint">「填寫工時」相關預設值。</div>
         <label class="pj-field-stack">
@@ -2380,41 +2411,9 @@ function applySettingsPatches(root) {
           <span class="muted">每次開啟「填寫工時」預帶的工時日期。改完下次開啟生效（不會覆蓋目前正在編輯的日期）。</span>
         </label>
         <div id="default-spent-on-offset-status" class="muted" style="font-size:13px; min-height:18px; margin-top:6px;"></div>
-
-        <div class="pj-settings-group-hint" style="margin-top:24px; padding-top:14px; border-top:1px solid var(--panel-border);">
-          <strong>Inline 工具</strong>（issue 詳細頁直接填工時，整合自舊 PJ_workingHours）
-        </div>
-        <label class="pj-field-stack" style="margin-top:10px;">
-          <span>Toolbar 顯示天數偏移（用逗號分隔）</span>
-          <input type="text" id="setting-inline-toolbar-offsets" value="${inlineOffsetsCsv}" placeholder="0,1,3">
-          <span class="muted">0=今日, 1=昨日, 2=前天, ..., 預設 0,1,3。issue 詳細頁的「今日工時」按鈕對應這些 offset。</span>
-        </label>
-        <div id="inline-toolbar-offsets-status" class="muted" style="font-size:13px; min-height:18px; margin-top:6px;"></div>
-
-        <label class="pj-field-stack" style="margin-top:18px;">
-          <span>Inline mini modal 預設活動</span>
-          <select id="setting-inline-default-activity-id" data-current="${inlineDefaultActivityId}">
-            <option value="">(載入中...)</option>
-          </select>
-          <span class="muted">點 toolbar 按鈕開的 mini modal 預填的 activity。下次開 modal 生效。</span>
-        </label>
-        <div id="inline-default-activity-id-status" class="muted" style="font-size:13px; min-height:18px; margin-top:6px;"></div>
-
-        <label class="pj-field-stack" style="margin-top:18px;">
-          <span>Inline mini modal 預設備註</span>
-          <input type="text" id="setting-inline-default-comment" value="${escapeAttr(inlineDefaultComment)}" placeholder="例：系統開發">
-          <span class="muted">點 toolbar 按鈕開的 mini modal 預填的備註文字。下次開 modal 生效。</span>
-        </label>
-        <div id="inline-default-comment-status" class="muted" style="font-size:13px; min-height:18px; margin-top:6px;"></div>
       `;
     }
     return `<div class="pj-settings-group-hint">本功能尚無可設定的預設值，未來會陸續加入。</div>`;
-  }
-
-  function escapeAttr(s) {
-    return String(s).replace(/[&<>"']/g, (c) => ({
-      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
-    })[c]);
   }
 
   const appearanceTabEl = tabBar.querySelector('[data-settings-tab="appearance"]');
@@ -2488,76 +2487,6 @@ function applySettingsPatches(root) {
       const label = labels[v] || `${v} 天前`;
       if (offsetStatus) offsetStatus.textContent = `已儲存：預設「${label}」（下次開啟生效）`;
     });
-  }
-
-  // worklog tab：inline toolbar offsets CSV
-  const inlineOffsetsInput = body.querySelector("#setting-inline-toolbar-offsets");
-  const inlineOffsetsStatus = body.querySelector("#inline-toolbar-offsets-status");
-  if (inlineOffsetsInput) {
-    const persistInlineOffsets = () => {
-      const raw = inlineOffsetsInput.value || "";
-      const parts = raw.split(",")
-        .map((s) => s.trim())
-        .filter((s) => s !== "")
-        .map((s) => Number(s))
-        .filter((n) => Number.isFinite(n) && n >= 0 && n <= 30)
-        .map((n) => Math.floor(n));
-      const deduped = Array.from(new Set(parts));
-      if (!deduped.length) {
-        if (inlineOffsetsStatus) inlineOffsetsStatus.textContent = "格式錯誤或全部無效，未儲存（請用 0,1,3 這種格式）";
-        return;
-      }
-      Store.set("inline_toolbar_offsets", deduped);
-      inlineOffsetsInput.value = deduped.join(",");
-      if (inlineOffsetsStatus) inlineOffsetsStatus.textContent = `已儲存：[${deduped.join(",")}]（下次重新整理 issue 頁生效）`;
-    };
-    inlineOffsetsInput.addEventListener("change", persistInlineOffsets);
-    inlineOffsetsInput.addEventListener("blur", persistInlineOffsets);
-  }
-
-  // worklog tab：inline default activity（async 載入 activities）
-  const inlineActivitySelect = body.querySelector("#setting-inline-default-activity-id");
-  const inlineActivityStatus = body.querySelector("#inline-default-activity-id-status");
-  if (inlineActivitySelect) {
-    (async () => {
-      try {
-        const data = await window.__worklog_redmineFetch("/enumerations/time_entry_activities.json");
-        const activities = (data && data.time_entry_activities) || [];
-        const current = inlineActivitySelect.dataset.current || "";
-        inlineActivitySelect.innerHTML = `<option value="">(未指定 — 不預填)</option>` +
-          activities.map((a) =>
-            `<option value="${a.id}" ${String(a.id) === current ? "selected" : ""}>${escapeAttr(a.name)}</option>`
-          ).join("");
-      } catch (err) {
-        inlineActivitySelect.innerHTML = `<option value="">(載入失敗：${escapeAttr(err.message || String(err))})</option>`;
-      }
-    })();
-    inlineActivitySelect.addEventListener("change", () => {
-      const v = inlineActivitySelect.value || "";
-      if (v) Store.set("inline_default_activity_id", v);
-      else Store.del("inline_default_activity_id");
-      if (inlineActivityStatus) {
-        const opt = inlineActivitySelect.options[inlineActivitySelect.selectedIndex];
-        const label = opt ? opt.textContent : v;
-        inlineActivityStatus.textContent = v ? `已儲存：${label}（下次開 mini modal 生效）` : "已清除（不預填活動）";
-      }
-    });
-  }
-
-  // worklog tab：inline default comment
-  const inlineCommentInput = body.querySelector("#setting-inline-default-comment");
-  const inlineCommentStatus = body.querySelector("#inline-default-comment-status");
-  if (inlineCommentInput) {
-    const persistInlineComment = () => {
-      const v = inlineCommentInput.value || "";
-      if (v.trim()) Store.set("inline_default_comment", v);
-      else Store.del("inline_default_comment");
-      if (inlineCommentStatus) {
-        inlineCommentStatus.textContent = v.trim() ? `已儲存（下次開 mini modal 生效）` : "已清除（不預填備註）";
-      }
-    };
-    inlineCommentInput.addEventListener("change", persistInlineComment);
-    inlineCommentInput.addEventListener("blur", persistInlineComment);
   }
 
   // tab 切換 click 由既有 worklog_app.js 的 [data-settings-tab] querySelectorAll
@@ -2784,6 +2713,7 @@ const SIDE_VIEWS = [
   { key: "phrases",         icon: "✏️", iconClass: "icon icon-edit",   label: "工時模板" },
   { key: "sources",         icon: "🔍", iconClass: "icon icon-filter", label: "PJ 篩選器" },
   { key: "issue-batch",     icon: "➕", iconClass: "icon icon-add",    label: "批次建 issue" },
+  { key: "inline-tools",    icon: "⚡", iconClass: "icon icon-settings", label: "Inline 工具" },
 ];
 window.__worklog_SIDE_VIEWS = SIDE_VIEWS;
 
@@ -3048,6 +2978,31 @@ function installWorktimeToolbar() {
 /* ----- Worktime mini modal ----- */
 let __currentModalConfirmHandler = null;
 let __currentModalCancelHandler = null;
+let __currentModalPhraseHandler = null;
+let __phrasesCachedForInline = null;
+
+async function fetchPhrasesForInline() {
+  if (__phrasesCachedForInline) return __phrasesCachedForInline;
+  try {
+    // fetchJsonAdapter 在 runtime.js top-level，inline-injector.js 同層可直接呼叫
+    const data = await fetchJsonAdapter("/api/phrases");
+    __phrasesCachedForInline = (data && data.phrases) || [];
+  } catch (err) {
+    __phrasesCachedForInline = [];
+  }
+  return __phrasesCachedForInline;
+}
+
+function applyPhraseToInlineModal(modal, phrase) {
+  if (!phrase) return;
+  if (phrase.hours) modal.querySelector("[data-field='hours']").value = phrase.hours;
+  if (phrase.activity_id) {
+    const sel = modal.querySelector("[data-field='activity_id']");
+    const matched = Array.from(sel.options).some((opt) => opt.value === String(phrase.activity_id));
+    if (matched) sel.value = String(phrase.activity_id);
+  }
+  if (phrase.comments) modal.querySelector("[data-field='comments']").value = phrase.comments;
+}
 
 async function openWorktimeMiniModal(issueId, offset) {
   const modal = document.getElementById(INLINE_MODAL_ID);
@@ -3058,26 +3013,53 @@ async function openWorktimeMiniModal(issueId, offset) {
   const spentOn = dateStrDaysAgo(offset);
   modal.querySelector("[data-field='issue_id']").textContent = `#${issueId}`;
   modal.querySelector("[data-field='spent_on']").value = spentOn;
-  modal.querySelector("[data-field='comments']").value = Store.get("inline_default_comment", "");
   modal.querySelector("[data-field='hours']").value = "";
+  modal.querySelector("[data-field='comments']").value = "";
 
+  // Activities (cached) + phrases (cached) 並行載入
   const activitySelect = modal.querySelector("[data-field='activity_id']");
-  await populateActivitiesSelect(activitySelect);
-  const defaultActivity = String(Store.get("inline_default_activity_id", ""));
-  if (defaultActivity) {
-    // 嘗試對應 value；若該 id 不在 options 中就 fallback
-    const matched = Array.from(activitySelect.options).some((opt) => opt.value === defaultActivity);
-    if (matched) activitySelect.value = defaultActivity;
+  const phraseSelect = modal.querySelector("[data-field='phrase_id']");
+  const [_, phrases] = await Promise.all([
+    populateActivitiesSelect(activitySelect),
+    fetchPhrasesForInline(),
+  ]);
+
+  // 填充 phrase select
+  const defaultPhraseId = String(Store.get("inline_default_phrase_id", ""));
+  phraseSelect.innerHTML =
+    `<option value="">(不套用模板)</option>` +
+    phrases
+      .map((p) => {
+        const label = p.label || `(未命名 - ${String(p.id).slice(0, 6)})`;
+        const selected = String(p.id) === defaultPhraseId ? " selected" : "";
+        return `<option value="${escapeForInline(String(p.id))}"${selected}>${escapeForInline(label)}</option>`;
+      })
+      .join("");
+
+  // 若有預設 phrase 就套用一次
+  if (defaultPhraseId) {
+    const phrase = phrases.find((p) => String(p.id) === defaultPhraseId);
+    if (phrase) applyPhraseToInlineModal(modal, phrase);
   }
 
   modal.hidden = false;
   modal.querySelector("[data-field='hours']").focus();
 
-  // 拆掉舊 listener (上次開過 modal 的)
+  // 拆掉舊 listener
   const confirmBtn = modal.querySelector("[data-action='confirm']");
   const cancelBtn = modal.querySelector("[data-action='cancel']");
   if (__currentModalConfirmHandler) confirmBtn.removeEventListener("click", __currentModalConfirmHandler);
   if (__currentModalCancelHandler) cancelBtn.removeEventListener("click", __currentModalCancelHandler);
+  if (__currentModalPhraseHandler) phraseSelect.removeEventListener("change", __currentModalPhraseHandler);
+
+  // Phrase 即時切換：套用該 phrase 的值（不清空既有 hours，user 已輸入的值用 applyPhraseToInlineModal 條件覆寫）
+  __currentModalPhraseHandler = () => {
+    const pid = phraseSelect.value;
+    if (!pid) return;
+    const phrase = phrases.find((p) => String(p.id) === pid);
+    if (phrase) applyPhraseToInlineModal(modal, phrase);
+  };
+  phraseSelect.addEventListener("change", __currentModalPhraseHandler);
 
   __currentModalCancelHandler = () => {
     modal.hidden = true;
@@ -3158,6 +3140,10 @@ function installInlineModal() {
   modal.innerHTML = `
     <div class="pj-inline-modal-box" role="dialog" aria-modal="true">
       <h3 class="pj-inline-modal-title">快速填工時 <span data-field="issue_id"></span></h3>
+      <label class="pj-inline-modal-label">
+        <span>套用工時模板（可隨時切換）</span>
+        <select data-field="phrase_id" class="pj-inline-input"></select>
+      </label>
       <label class="pj-inline-modal-label">
         <span>日期</span>
         <input type="date" data-field="spent_on" class="pj-inline-input">
@@ -3294,8 +3280,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605151622";
-const APP_BUILD_TIME = "2026-05-15 16:22";
+const APP_VERSION = "1.0.202605151703";
+const APP_BUILD_TIME = "2026-05-15 17:03";
 
 const state = {
   localToday: localDateString(new Date()),
@@ -3421,6 +3407,10 @@ const elements = {
   batchResultsList: document.getElementById("batch-results-list"),
   phrasesAlertStack: document.getElementById("phrases-alert-stack"),
   sourcesAlertStack: document.getElementById("sources-alert-stack"),
+  inlineToolbarOffsetsInput: document.getElementById("inline-toolbar-offsets-input"),
+  inlineToolbarOffsetsStatus: document.getElementById("inline-toolbar-offsets-status"),
+  inlineDefaultPhraseSelect: document.getElementById("inline-default-phrase-select"),
+  inlineDefaultPhraseStatus: document.getElementById("inline-default-phrase-status"),
 };
 
 /* ===== Toast：短暫操作反饋 (success / error / info)，自動消失 ============== */
@@ -5292,6 +5282,7 @@ function renderAll() {
   renderAlerts();
   renderTable();
   if (state.sideView === "phrases") renderPhrasesDrawer();
+  if (state.sideView === "inline-tools") renderInlineToolsView();
   if (state.sideView === "sources") renderSourcesDrawer();
   if (state.sideView === "issue-batch") renderIssueBatchView();
   renderLoadingMask();
@@ -5366,6 +5357,72 @@ async function deleteIssueTemplateById(id) {
   await fetchJson(`/api/issue-templates/${encodeURIComponent(id)}`, { method: "DELETE" });
   state.issueTemplates = state.issueTemplates.filter((t) => t.id !== id);
   state.batchSelectedTemplateIds.delete(id);
+}
+
+/* ===== Inline 工具 view（toolbar offsets + 預設工時模板） ================= */
+let __inlineToolsHandlersBound = false;
+
+function renderInlineToolsView() {
+  if (!elements.inlineToolbarOffsetsInput) return;
+
+  // 1. Toolbar offsets：從 Store 載入
+  let offsets = Store.get("inline_toolbar_offsets", [0, 1, 3]);
+  if (!Array.isArray(offsets)) offsets = [0, 1, 3];
+  elements.inlineToolbarOffsetsInput.value = offsets.join(",");
+
+  // 2. Phrase select：列出 state.phrases，selected based on Store
+  const currentPhraseId = String(Store.get("inline_default_phrase_id", ""));
+  const phrasesHtml = [`<option value="">(無 — 不預填，每次手動填)</option>`]
+    .concat(
+      state.phrases.map((p) => {
+        const label = p.label || `(未命名 - ${p.id.slice(0, 6)})`;
+        const summary = phrasePresetSummary(p);
+        const display = summary ? `${label}  ·  ${summary}` : label;
+        const selected = p.id === currentPhraseId ? " selected" : "";
+        return `<option value="${escapeHtml(p.id)}"${selected}>${escapeHtml(display)}</option>`;
+      })
+    )
+    .join("");
+  elements.inlineDefaultPhraseSelect.innerHTML = phrasesHtml;
+
+  // 3. 綁定 handlers (只綁一次)
+  if (__inlineToolsHandlersBound) return;
+  __inlineToolsHandlersBound = true;
+
+  const persistOffsets = () => {
+    const raw = elements.inlineToolbarOffsetsInput.value || "";
+    const parts = raw.split(",")
+      .map((s) => s.trim())
+      .filter((s) => s !== "")
+      .map((s) => Number(s))
+      .filter((n) => Number.isFinite(n) && n >= 0 && n <= 30)
+      .map((n) => Math.floor(n));
+    const deduped = Array.from(new Set(parts));
+    const status = elements.inlineToolbarOffsetsStatus;
+    if (!deduped.length) {
+      if (status) status.textContent = "格式錯誤或全部無效，未儲存（請用 0,1,3 這種格式）";
+      return;
+    }
+    Store.set("inline_toolbar_offsets", deduped);
+    elements.inlineToolbarOffsetsInput.value = deduped.join(",");
+    if (status) status.textContent = `已儲存：[${deduped.join(",")}]（下次重新整理 issue 頁生效）`;
+  };
+  elements.inlineToolbarOffsetsInput.addEventListener("change", persistOffsets);
+  elements.inlineToolbarOffsetsInput.addEventListener("blur", persistOffsets);
+
+  elements.inlineDefaultPhraseSelect.addEventListener("change", () => {
+    const v = elements.inlineDefaultPhraseSelect.value || "";
+    const status = elements.inlineDefaultPhraseStatus;
+    if (v) {
+      Store.set("inline_default_phrase_id", v);
+      const phrase = state.phrases.find((p) => p.id === v);
+      const name = phrase?.label || "(未命名模板)";
+      if (status) status.textContent = `已儲存：預設套用「${name}」（下次開 mini modal 生效）`;
+    } else {
+      Store.del("inline_default_phrase_id");
+      if (status) status.textContent = "已清除（不預填，每次手動填）";
+    }
+  });
 }
 
 function renderIssueBatchView() {
@@ -6246,8 +6303,11 @@ function boot() {
   installInlineModal();  // 預先 inject mini modal 到 body（toolbar 點擊時用）
   installInlineTools();  // 若當前是 /issues/{id} 詳細頁就 inject form + toolbar
   recordIssueVisit().catch(() => {});
-  // 一次性清掉舊浮動按鈕位置殘留（已 deprecated）
+  // 一次性清掉舊殘留（deprecated keys）
   Store.del('launcher_pos');
+  // inline 工具改用 phrase 關聯後不再用獨立 activity / comment 設定
+  Store.del('inline_default_activity_id');
+  Store.del('inline_default_comment');
   console.log('[LawPJ Worklog] userscript 已就緒（從上方 menu 進入工時助手）');
 }
 if (document.readyState === 'loading') {

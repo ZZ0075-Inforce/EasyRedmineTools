@@ -1991,6 +1991,43 @@
           <div class="drawer-list" id="batch-results-list"></div>
         </article>
       </div><!-- /main-view issue-batch -->
+
+      <div class="main-view" data-view="inline-tools" hidden>
+        <article class="panel main-card-view">
+          <div class="view-head">
+            <h2 class="view-title">⚡ Inline 工具</h2>
+            <p class="muted">issue 詳細頁直接快填工時 / 更新起迄日。整合自舊 PJ_workingHours + PJ_startToEndDate 兩個 userscript。設定改完下次重新整理 issue 頁生效。</p>
+          </div>
+
+          <div class="alert-stack" id="inline-tools-alert-stack"></div>
+
+          <section class="add-form">
+            <div class="settings-group-hint">
+              <strong>Toolbar 按鈕</strong>：issue 詳細頁的 menu 列會顯示這些「N 日前工時」連結，點擊開啟快填 mini modal。
+            </div>
+            <label class="field-stack">
+              <span>顯示天數偏移（用逗號分隔）</span>
+              <input type="text" id="inline-toolbar-offsets-input" placeholder="0,1,3">
+              <span class="muted">0=今日, 1=昨日, 2=前天, ..., 預設 0,1,3。下次重新整理 issue 頁生效。</span>
+            </label>
+            <div id="inline-toolbar-offsets-status" class="muted" style="font-size:13px; min-height:18px; margin-top:6px;"></div>
+          </section>
+
+          <section class="add-form" style="margin-top: 16px;">
+            <div class="settings-group-hint">
+              <strong>Mini modal 預設工時模板</strong>：點 toolbar 按鈕開的 modal 自動套用此模板的「時數 / 活動 / 備註」。Modal 內可即時切換別的模板。
+            </div>
+            <label class="field-stack">
+              <span>選擇預設工時模板</span>
+              <select id="inline-default-phrase-select">
+                <option value="">(無 — 不預填，每次手動填)</option>
+              </select>
+              <span class="muted">下拉列出的是「工時模板」view 內建立的模板。沒模板可先去那邊建。</span>
+            </label>
+            <div id="inline-default-phrase-status" class="muted" style="font-size:13px; min-height:18px; margin-top:6px;"></div>
+          </section>
+        </article>
+      </div><!-- /main-view inline-tools -->
     </div>
     </div>
 

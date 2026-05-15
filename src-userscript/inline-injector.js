@@ -163,6 +163,31 @@ function installWorktimeToolbar() {
 /* ----- Worktime mini modal ----- */
 let __currentModalConfirmHandler = null;
 let __currentModalCancelHandler = null;
+let __currentModalPhraseHandler = null;
+let __phrasesCachedForInline = null;
+
+async function fetchPhrasesForInline() {
+  if (__phrasesCachedForInline) return __phrasesCachedForInline;
+  try {
+    // fetchJsonAdapter 在 runtime.js top-level，inline-injector.js 同層可直接呼叫
+    const data = await fetchJsonAdapter("/api/phrases");
+    __phrasesCachedForInline = (data && data.phrases) || [];
+  } catch (err) {
+    __phrasesCachedForInline = [];
+  }
+  return __phrasesCachedForInline;
+}
+
+function applyPhraseToInlineModal(modal, phrase) {
+  if (!phrase) return;
+  if (phrase.hours) modal.querySelector("[data-field='hours']").value = phrase.hours;
+  if (phrase.activity_id) {
+    const sel = modal.querySelector("[data-field='activity_id']");
+    const matched = Array.from(sel.options).some((opt) => opt.value === String(phrase.activity_id));
+    if (matched) sel.value = String(phrase.activity_id);
+  }
+  if (phrase.comments) modal.querySelector("[data-field='comments']").value = phrase.comments;
+}
 
 async function openWorktimeMiniModal(issueId, offset) {
   const modal = document.getElementById(INLINE_MODAL_ID);
@@ -173,26 +198,53 @@ async function openWorktimeMiniModal(issueId, offset) {
   const spentOn = dateStrDaysAgo(offset);
   modal.querySelector("[data-field='issue_id']").textContent = `#${issueId}`;
   modal.querySelector("[data-field='spent_on']").value = spentOn;
-  modal.querySelector("[data-field='comments']").value = Store.get("inline_default_comment", "");
   modal.querySelector("[data-field='hours']").value = "";
+  modal.querySelector("[data-field='comments']").value = "";
 
+  // Activities (cached) + phrases (cached) 並行載入
   const activitySelect = modal.querySelector("[data-field='activity_id']");
-  await populateActivitiesSelect(activitySelect);
-  const defaultActivity = String(Store.get("inline_default_activity_id", ""));
-  if (defaultActivity) {
-    // 嘗試對應 value；若該 id 不在 options 中就 fallback
-    const matched = Array.from(activitySelect.options).some((opt) => opt.value === defaultActivity);
-    if (matched) activitySelect.value = defaultActivity;
+  const phraseSelect = modal.querySelector("[data-field='phrase_id']");
+  const [_, phrases] = await Promise.all([
+    populateActivitiesSelect(activitySelect),
+    fetchPhrasesForInline(),
+  ]);
+
+  // 填充 phrase select
+  const defaultPhraseId = String(Store.get("inline_default_phrase_id", ""));
+  phraseSelect.innerHTML =
+    `<option value="">(不套用模板)</option>` +
+    phrases
+      .map((p) => {
+        const label = p.label || `(未命名 - ${String(p.id).slice(0, 6)})`;
+        const selected = String(p.id) === defaultPhraseId ? " selected" : "";
+        return `<option value="${escapeForInline(String(p.id))}"${selected}>${escapeForInline(label)}</option>`;
+      })
+      .join("");
+
+  // 若有預設 phrase 就套用一次
+  if (defaultPhraseId) {
+    const phrase = phrases.find((p) => String(p.id) === defaultPhraseId);
+    if (phrase) applyPhraseToInlineModal(modal, phrase);
   }
 
   modal.hidden = false;
   modal.querySelector("[data-field='hours']").focus();
 
-  // 拆掉舊 listener (上次開過 modal 的)
+  // 拆掉舊 listener
   const confirmBtn = modal.querySelector("[data-action='confirm']");
   const cancelBtn = modal.querySelector("[data-action='cancel']");
   if (__currentModalConfirmHandler) confirmBtn.removeEventListener("click", __currentModalConfirmHandler);
   if (__currentModalCancelHandler) cancelBtn.removeEventListener("click", __currentModalCancelHandler);
+  if (__currentModalPhraseHandler) phraseSelect.removeEventListener("change", __currentModalPhraseHandler);
+
+  // Phrase 即時切換：套用該 phrase 的值（不清空既有 hours，user 已輸入的值用 applyPhraseToInlineModal 條件覆寫）
+  __currentModalPhraseHandler = () => {
+    const pid = phraseSelect.value;
+    if (!pid) return;
+    const phrase = phrases.find((p) => String(p.id) === pid);
+    if (phrase) applyPhraseToInlineModal(modal, phrase);
+  };
+  phraseSelect.addEventListener("change", __currentModalPhraseHandler);
 
   __currentModalCancelHandler = () => {
     modal.hidden = true;
@@ -273,6 +325,10 @@ function installInlineModal() {
   modal.innerHTML = `
     <div class="pj-inline-modal-box" role="dialog" aria-modal="true">
       <h3 class="pj-inline-modal-title">快速填工時 <span data-field="issue_id"></span></h3>
+      <label class="pj-inline-modal-label">
+        <span>套用工時模板（可隨時切換）</span>
+        <select data-field="phrase_id" class="pj-inline-input"></select>
+      </label>
       <label class="pj-inline-modal-label">
         <span>日期</span>
         <input type="date" data-field="spent_on" class="pj-inline-input">
