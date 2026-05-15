@@ -130,6 +130,8 @@ const elements = {
   inlineToolbarOffsetsStatus: document.getElementById("inline-toolbar-offsets-status"),
   inlineDefaultPhraseSelect: document.getElementById("inline-default-phrase-select"),
   inlineDefaultPhraseStatus: document.getElementById("inline-default-phrase-status"),
+  inlineToolsEnabledToggle: document.getElementById("inline-tools-enabled-toggle"),
+  inlineToolsEnabledStatus: document.getElementById("inline-tools-enabled-status"),
 };
 
 /* ===== Toast：短暫操作反饋 (success / error / info)，自動消失 ============== */
@@ -2091,6 +2093,12 @@ let __inlineToolsHandlersBound = false;
 function renderInlineToolsView() {
   if (!elements.inlineToolbarOffsetsInput) return;
 
+  // 0. Enabled toggle：從 Store 載入當前 checked 狀態（每次切到 view 都同步）
+  if (elements.inlineToolsEnabledToggle) {
+    const enabled = Store.get("inline_tools_enabled", true) !== false;
+    elements.inlineToolsEnabledToggle.checked = enabled;
+  }
+
   // 1. Toolbar offsets：從 Store 載入
   let offsets = Store.get("inline_toolbar_offsets", [0, 1, 3]);
   if (!Array.isArray(offsets)) offsets = [0, 1, 3];
@@ -2114,6 +2122,26 @@ function renderInlineToolsView() {
   // 3. 綁定 handlers (只綁一次)
   if (__inlineToolsHandlersBound) return;
   __inlineToolsHandlersBound = true;
+
+  // Toggle: persist + 立即 install/uninstall
+  if (elements.inlineToolsEnabledToggle) {
+    elements.inlineToolsEnabledToggle.addEventListener("change", () => {
+      const v = elements.inlineToolsEnabledToggle.checked;
+      Store.set("inline_tools_enabled", v);
+      const status = elements.inlineToolsEnabledStatus;
+      if (v) {
+        if (typeof window.__worklog_installInlineTools === "function") {
+          window.__worklog_installInlineTools();
+        }
+        if (status) status.textContent = "已啟用：當前 issue 頁立即注入；非 issue 頁需切到 issue 頁才會看到";
+      } else {
+        if (typeof window.__worklog_uninstallInlineTools === "function") {
+          window.__worklog_uninstallInlineTools();
+        }
+        if (status) status.textContent = "已停用：已移除 quick-edit form 與 toolbar items";
+      }
+    });
+  }
 
   const persistOffsets = () => {
     const raw = elements.inlineToolbarOffsetsInput.value || "";

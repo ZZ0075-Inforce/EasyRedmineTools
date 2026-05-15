@@ -1999,6 +1999,17 @@
             <p class="muted">issue 詳細頁直接快填工時 / 更新起迄日。整合自舊 PJ_workingHours + PJ_startToEndDate 兩個 userscript。設定改完下次重新整理 issue 頁生效。</p>
           </div>
 
+          <section class="add-form" style="margin-bottom: 12px;">
+            <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="inline-tools-enabled-toggle" style="width: 18px; height: 18px; margin-top: 2px; flex-shrink: 0;">
+              <div style="flex: 1;">
+                <div style="font-weight: 500;">啟用 Inline 工具</div>
+                <div class="muted" style="font-size: 12px; margin-top: 2px;">關閉後 issue 詳細頁不再注入 quick-edit form 與 worktime toolbar。立即生效（會移除目前頁面已注入的元素）。</div>
+              </div>
+            </label>
+            <div id="inline-tools-enabled-status" class="muted" style="font-size: 13px; min-height: 18px; margin-top: 6px;"></div>
+          </section>
+
           <div class="alert-stack" id="inline-tools-alert-stack"></div>
 
           <section class="add-form">

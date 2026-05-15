@@ -14,11 +14,28 @@ function getIssueIdFromPath() {
   return m ? Number(m[1]) : null;
 }
 
-/* ----- 入口：boot 階段呼叫 ----- */
+/* ----- 入口：boot 階段呼叫 / toggle ON 立即呼叫 ----- */
 function installInlineTools() {
   if (!isIssueDetailPage()) return;
+  // Toggle 檢查：default true 保持向後相容
+  if (Store.get("inline_tools_enabled", true) === false) return;
   installQuickEditForm();
   installWorktimeToolbar();
+}
+
+/* ----- 反向：toggle OFF 時移除已注入 DOM ----- */
+function uninstallInlineTools() {
+  // 移除 quick-edit form
+  const form = document.getElementById(INLINE_FORM_ID);
+  if (form) form.remove();
+  // 移除 toolbar marker + 所有 toolbar items
+  const marker = document.getElementById(INLINE_TOOLBAR_ID);
+  if (marker) marker.remove();
+  for (const li of document.querySelectorAll('[data-worklog-inline-toolbar-item="1"]')) {
+    li.remove();
+  }
+  // 注意:不移除 #__worklog_inline_modal 與 toast container 因為若 modal 開啟中
+  // 移除會 race；它們留著沒副作用 (惰性使用)。
 }
 
 /* ----- inline toast（self-contained，因為 worklog_app.js 的 showToast 在 __initWorklogApp wrap 內取不到） ----- */
@@ -456,5 +473,6 @@ const INLINE_CSS = `
 `;
 
 window.__worklog_installInlineTools = installInlineTools;
+window.__worklog_uninstallInlineTools = uninstallInlineTools;
 window.__worklog_installInlineModal = installInlineModal;
 window.__worklog_inlineToast = inlineToast;
