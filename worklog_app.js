@@ -2020,6 +2020,32 @@ function renderAll() {
   updateDailyTotalBadge();
   updateSettingsTheme();
   persistState();
+  // Phrase menu popup 用 position: fixed, 需 JS 計算 button rect 設座標
+  if (state.openPhraseMenuFor !== null) {
+    requestAnimationFrame(positionPhraseMenuPopup);
+  }
+}
+
+// Phrase popup 用 fixed 跳出 .table-wrap overflow clip; renderAll 後重定位
+function positionPhraseMenuPopup() {
+  const popup = document.querySelector(".phrase-menu-popup");
+  if (!popup) return;
+  const wrap = popup.closest(".phrase-menu-wrap");
+  if (!wrap) return;
+  const btn = wrap.querySelector(".phrase-menu-button");
+  if (!btn) return;
+  const rect = btn.getBoundingClientRect();
+  const popupRect = popup.getBoundingClientRect();
+  // 預設: popup 右邊對齊 button 右邊, 在 button 下方
+  let top = rect.bottom + 4;
+  let right = window.innerWidth - rect.right;
+  // 若往下空間不夠 → 改向上開
+  if (top + popupRect.height > window.innerHeight - 8) {
+    top = rect.top - popupRect.height - 4;
+  }
+  popup.style.top = `${Math.max(8, top)}px`;
+  popup.style.right = `${Math.max(8, right)}px`;
+  popup.style.left = "auto";
 }
 
 let __batchRowUidCounter = 1;
@@ -2757,6 +2783,20 @@ document.addEventListener("click", (event) => {
 });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && state.openPhraseMenuFor !== null) {
+    state.openPhraseMenuFor = null;
+    renderAll();
+  }
+});
+// Phrase popup 用 position: fixed, scroll/resize 時關閉以避免位置失效
+// capture: true 抓 nested scroll container (main-view / panel / table-wrap 都會 fire)
+window.addEventListener("scroll", () => {
+  if (state.openPhraseMenuFor !== null) {
+    state.openPhraseMenuFor = null;
+    renderAll();
+  }
+}, true);
+window.addEventListener("resize", () => {
+  if (state.openPhraseMenuFor !== null) {
     state.openPhraseMenuFor = null;
     renderAll();
   }

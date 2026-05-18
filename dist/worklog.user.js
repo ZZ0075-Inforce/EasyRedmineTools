@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605151811
+// @version      1.0.202605181119
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -857,8 +857,7 @@ const APP_CSS = `#__worklog_root {
         display: grid;
         grid-template-columns: 1fr;
         gap: 8px;
-        max-height: 620px;
-        overflow-y: auto;
+        
       }#__worklog_root .pj-issue-card {
         width: 100%;
         box-sizing: border-box;
@@ -1365,16 +1364,14 @@ const APP_CSS = `#__worklog_root {
         background: var(--accent-soft);
         border-color: var(--accent);
       }#__worklog_root .pj-phrase-menu-arrow { font-size: 9px; color: var(--muted); margin-left: 2px; }#__worklog_root .pj-phrase-menu-popup {
-        position: absolute;
-        top: calc(100% + 4px);
-        right: 0;
+        position: fixed;  
         min-width: 240px;
         max-width: 320px;
         background: var(--panel);
         border: 1px solid var(--panel-border);
         border-radius: 8px;
         box-shadow: 0 4px 16px rgba(0,0,0,0.15);
-        z-index: 30;
+        z-index: 2147483646;
         padding: 4px 0;
         animation: phrase-menu-in 120ms ease-out;
       }
@@ -2554,9 +2551,48 @@ const LAUNCHER_CSS = `
   overflow: hidden !important;
 }
 #${OVERLAY_ROOT_ID} .shell {
-  overflow-y: auto !important;
+  overflow: hidden !important;  /* 外層不滾, 內層 pj-main-view / panel 自己滾 */
+  display: flex !important;
+  flex-direction: column !important;
   height: 100% !important;
   min-height: 0 !important;
+}
+#${OVERLAY_ROOT_ID} .shell > .pj-main-toolbar { flex-shrink: 0 !important; }
+/* pj-main-view 撐滿 .shell 剩餘空間, 預設整 view 自己滾 (mobile / 簡單 view 用) */
+#${OVERLAY_ROOT_ID} .shell > .pj-main-view:not([hidden]) {
+  flex: 1 !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+}
+/* Desktop worklog view: panel 內部各自滾, pj-main-view 不滾, .shell 不滾 */
+@media (min-width: 768px) {
+  #${OVERLAY_ROOT_ID} .shell > .pj-main-view[data-view="worklog"]:not([hidden]) {
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  #${OVERLAY_ROOT_ID} .pj-main-view[data-view="worklog"] .layout {
+    flex: 1 !important;
+    min-height: 0 !important;
+  }
+  #${OVERLAY_ROOT_ID} .layout > .pj-list-panel,
+  #${OVERLAY_ROOT_ID} .layout > .pj-details-panel {
+    display: flex !important;
+    flex-direction: column !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+  }
+  #${OVERLAY_ROOT_ID} .pj-list-panel .pj-issue-list {
+    flex: 1 !important;
+    overflow-y: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+  }
+  #${OVERLAY_ROOT_ID} .pj-details-panel .pj-table-wrap {
+    flex: 1 !important;
+    overflow: auto !important;
+    min-height: 0 !important;
+  }
 }
 /* 強制 sticky 元素留在 overlay 內，覆寫原本 mobile 的 position:fixed */
 #${OVERLAY_ROOT_ID} .pj-sticky-actions {
@@ -3334,8 +3370,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605151811";
-const APP_BUILD_TIME = "2026-05-15 18:11";
+const APP_VERSION = "1.0.202605181119";
+const APP_BUILD_TIME = "2026-05-18 11:19";
 
 const state = {
   localToday: localDateString(new Date()),
@@ -5348,6 +5384,32 @@ function renderAll() {
   updateDailyTotalBadge();
   updateSettingsTheme();
   persistState();
+  // Phrase menu popup 用 position: fixed, 需 JS 計算 button rect 設座標
+  if (state.openPhraseMenuFor !== null) {
+    requestAnimationFrame(positionPhraseMenuPopup);
+  }
+}
+
+// Phrase popup 用 fixed 跳出 .pj-table-wrap overflow clip; renderAll 後重定位
+function positionPhraseMenuPopup() {
+  const popup = document.querySelector(".pj-phrase-menu-popup");
+  if (!popup) return;
+  const wrap = popup.closest(".pj-phrase-menu-wrap");
+  if (!wrap) return;
+  const btn = wrap.querySelector(".pj-phrase-menu-button");
+  if (!btn) return;
+  const rect = btn.getBoundingClientRect();
+  const popupRect = popup.getBoundingClientRect();
+  // 預設: popup 右邊對齊 button 右邊, 在 button 下方
+  let top = rect.bottom + 4;
+  let right = window.innerWidth - rect.right;
+  // 若往下空間不夠 → 改向上開
+  if (top + popupRect.height > window.innerHeight - 8) {
+    top = rect.top - popupRect.height - 4;
+  }
+  popup.style.top = `${Math.max(8, top)}px`;
+  popup.style.right = `${Math.max(8, right)}px`;
+  popup.style.left = "auto";
 }
 
 let __batchRowUidCounter = 1;
@@ -6085,6 +6147,20 @@ document.addEventListener("click", (event) => {
 });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && state.openPhraseMenuFor !== null) {
+    state.openPhraseMenuFor = null;
+    renderAll();
+  }
+});
+// Phrase popup 用 position: fixed, scroll/resize 時關閉以避免位置失效
+// capture: true 抓 nested scroll container (pj-main-view / panel / pj-table-wrap 都會 fire)
+window.addEventListener("scroll", () => {
+  if (state.openPhraseMenuFor !== null) {
+    state.openPhraseMenuFor = null;
+    renderAll();
+  }
+}, true);
+window.addEventListener("resize", () => {
+  if (state.openPhraseMenuFor !== null) {
     state.openPhraseMenuFor = null;
     renderAll();
   }

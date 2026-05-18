@@ -35,9 +35,48 @@ const LAUNCHER_CSS = `
   overflow: hidden !important;
 }
 #${OVERLAY_ROOT_ID} .shell {
-  overflow-y: auto !important;
+  overflow: hidden !important;  /* 外層不滾, 內層 main-view / panel 自己滾 */
+  display: flex !important;
+  flex-direction: column !important;
   height: 100% !important;
   min-height: 0 !important;
+}
+#${OVERLAY_ROOT_ID} .shell > .main-toolbar { flex-shrink: 0 !important; }
+/* main-view 撐滿 .shell 剩餘空間, 預設整 view 自己滾 (mobile / 簡單 view 用) */
+#${OVERLAY_ROOT_ID} .shell > .main-view:not([hidden]) {
+  flex: 1 !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+}
+/* Desktop worklog view: panel 內部各自滾, main-view 不滾, .shell 不滾 */
+@media (min-width: 768px) {
+  #${OVERLAY_ROOT_ID} .shell > .main-view[data-view="worklog"]:not([hidden]) {
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  #${OVERLAY_ROOT_ID} .main-view[data-view="worklog"] .layout {
+    flex: 1 !important;
+    min-height: 0 !important;
+  }
+  #${OVERLAY_ROOT_ID} .layout > .list-panel,
+  #${OVERLAY_ROOT_ID} .layout > .details-panel {
+    display: flex !important;
+    flex-direction: column !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+  }
+  #${OVERLAY_ROOT_ID} .list-panel .issue-list {
+    flex: 1 !important;
+    overflow-y: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+  }
+  #${OVERLAY_ROOT_ID} .details-panel .table-wrap {
+    flex: 1 !important;
+    overflow: auto !important;
+    min-height: 0 !important;
+  }
 }
 /* 強制 sticky 元素留在 overlay 內，覆寫原本 mobile 的 position:fixed */
 #${OVERLAY_ROOT_ID} .sticky-actions {

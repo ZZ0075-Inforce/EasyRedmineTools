@@ -627,8 +627,7 @@
         display: grid;
         grid-template-columns: 1fr;
         gap: 8px;
-        max-height: 620px;
-        overflow-y: auto;
+        /* 高度與 overflow 由 overlay.js media query 動態套用 (desktop panel 內滾, mobile 整 view 滾) */
       }
 
       .issue-card {
@@ -1381,16 +1380,14 @@
       .phrase-menu-arrow { font-size: 9px; color: var(--muted); margin-left: 2px; }
 
       .phrase-menu-popup {
-        position: absolute;
-        top: calc(100% + 4px);
-        right: 0;
+        position: fixed;  /* 跳出 .table-wrap overflow clip; top/right 由 JS 設 */
         min-width: 240px;
         max-width: 320px;
         background: var(--panel);
         border: 1px solid var(--panel-border);
         border-radius: 8px;
         box-shadow: 0 4px 16px rgba(0,0,0,0.15);
-        z-index: 30;
+        z-index: 2147483646;
         padding: 4px 0;
         animation: phrase-menu-in 120ms ease-out;
       }
