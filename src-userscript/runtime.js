@@ -169,6 +169,50 @@ async function recordIssueVisit() {
 
 window.__worklog_recordVisit = recordIssueVisit;
 
+/* ===== visited subjects 1 小時 cache refresh：回頭更新被異動的 subject ===== */
+const VISITED_REFRESH_INTERVAL_MS = 60 * 60 * 1000;  // 1 hour
+
+function isVisitedSubjectsStale() {
+  const last = Store.get("visited_subjects_refreshed_at", "");
+  if (!last) return true;  // 從未 refresh 過 (含升版初次)
+  const lastMs = new Date(last).getTime();
+  if (!Number.isFinite(lastMs)) return true;
+  return (Date.now() - lastMs) >= VISITED_REFRESH_INTERVAL_MS;
+}
+
+async function refreshVisitedSubjects() {
+  const list = Store.get("visited_issues", []) || [];
+  if (!list.length) {
+    Store.set("visited_subjects_refreshed_at", new Date().toISOString());
+    return [];
+  }
+  const ids = list.map((x) => x.issue_id).filter((id) => Number.isFinite(id));
+  if (!ids.length) return list;
+
+  try {
+    // status_id=* 含關閉的 issue (避免 default open filter 漏掉 user 看過再被關的)
+    const path = `/issues.json?issue_id=${ids.join(",")}&status_id=*&limit=100`;
+    const data = await redmineFetch(path);
+    const fresh = (data?.issues || []).map(toIssueSummary);
+    const freshById = new Map(fresh.map((it) => [it.issue_id, it]));
+
+    // Merge: 保留 last_visited_at; 用 fresh 蓋掉其他 fields
+    // 若 issue 不在 batch 回應 (可能已刪/權限關閉) 保留舊資料
+    const updated = list.map((entry) => {
+      const f = freshById.get(entry.issue_id);
+      if (!f) return entry;
+      return { ...f, last_visited_at: entry.last_visited_at };
+    });
+
+    Store.set("visited_issues", updated);
+    Store.set("visited_subjects_refreshed_at", new Date().toISOString());
+    return updated;
+  } catch (err) {
+    // Refresh 失敗 → 用既有 cached, 不更新時間戳 (下次仍會嘗試 refresh)
+    return list;
+  }
+}
+
 /* ===== 目前使用者 id：避免依賴 Redmine "me" keyword（不同版本行為不一） ===== */
 let __currentUserId = null;
 let __currentUserPromise = null;
@@ -283,8 +327,12 @@ const handlers = {
         path = `/issues.json?query_id=${encodeURIComponent(queryId || "")}&set_filter=1&limit=100`;
       } else if (source === "visited") {
         // 從 GM 儲存讀「近 7 天 /issues/{id} 訪問過」的清單
+        // D 方案: cache > 1 hr stale 時 batch refresh subjects (回頭更新被異動的標題)
         const cutoff = dateStrDaysAgo(getVisitRetentionDays());
-        let list = (Store.get("visited_issues", []) || []).filter(
+        let list = isVisitedSubjectsStale()
+          ? await refreshVisitedSubjects()
+          : (Store.get("visited_issues", []) || []);
+        list = list.filter(
           (x) => x && (x.last_visited_at || "") >= cutoff
         );
         // dateFilter 進階篩選日期 → 只回那天看過的
