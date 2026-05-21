@@ -1993,22 +1993,13 @@
         <article class="panel main-card-view">
           <div class="view-head">
             <h2 class="view-title">⚡ Inline 工具</h2>
-            <p class="muted">issue 詳細頁直接快填工時 / 更新起迄日。整合自舊 PJ_workingHours + PJ_startToEndDate 兩個 userscript。設定改完下次重新整理 issue 頁生效。</p>
+            <p class="muted">issue 詳細頁直接快填工時（整合自舊 LawPJ_工時toolbar）。設定改完下次重新整理 issue 頁生效。</p>
           </div>
 
           <section class="add-form" style="margin-bottom: 12px;">
             <div class="settings-group-hint" style="margin-bottom: 10px;">
-              <strong>功能開關</strong>：兩個 inline 功能可以個別開關。立即生效（會移除目前頁面已注入的元素）。
+              <strong>功能開關</strong>：立即生效（會移除目前頁面已注入的元素）。
             </div>
-            <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; margin-bottom: 10px;">
-              <input type="checkbox" id="inline-quick-edit-enabled-toggle" style="width: 18px; height: 18px; margin-top: 2px; flex-shrink: 0;">
-              <div style="flex: 1;">
-                <div style="font-weight: 500;">啟用 Quick Edit 表單</div>
-                <div class="muted" style="font-size: 12px; margin-top: 2px;">issue 詳細頁 #issue_detail_header 上方注入「預估工時 / 開始日期 / 完成日期 / 更新」表單（取代舊 PJ_起迄耗時）。</div>
-              </div>
-            </label>
-            <div id="inline-quick-edit-enabled-status" class="muted" style="font-size: 13px; min-height: 18px; margin-bottom: 12px;"></div>
-
             <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="inline-toolbar-enabled-toggle" style="width: 18px; height: 18px; margin-top: 2px; flex-shrink: 0;">
               <div style="flex: 1;">

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605181119
+// @version      1.0.202605211459
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -263,22 +263,13 @@ const APP_HTML = `<div class="pj-app-shell">
         <article class="panel pj-main-card-view">
           <div class="pj-view-head">
             <h2 class="pj-view-title">⚡ Inline 工具</h2>
-            <p class="muted">issue 詳細頁直接快填工時 / 更新起迄日。整合自舊 PJ_workingHours + PJ_startToEndDate 兩個 userscript。設定改完下次重新整理 issue 頁生效。</p>
+            <p class="muted">issue 詳細頁直接快填工時（整合自舊 LawPJ_工時toolbar）。設定改完下次重新整理 issue 頁生效。</p>
           </div>
 
           <section class="pj-add-form" style="margin-bottom: 12px;">
             <div class="pj-settings-group-hint" style="margin-bottom: 10px;">
-              <strong>功能開關</strong>：兩個 inline 功能可以個別開關。立即生效（會移除目前頁面已注入的元素）。
+              <strong>功能開關</strong>：立即生效（會移除目前頁面已注入的元素）。
             </div>
-            <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; margin-bottom: 10px;">
-              <input type="checkbox" id="inline-quick-edit-enabled-toggle" style="width: 18px; height: 18px; margin-top: 2px; flex-shrink: 0;">
-              <div style="flex: 1;">
-                <div style="font-weight: 500;">啟用 Quick Edit 表單</div>
-                <div class="muted" style="font-size: 12px; margin-top: 2px;">issue 詳細頁 #issue_detail_header 上方注入「預估工時 / 開始日期 / 完成日期 / 更新」表單（取代舊 PJ_起迄耗時）。</div>
-              </div>
-            </label>
-            <div id="inline-quick-edit-enabled-status" class="muted" style="font-size: 13px; min-height: 18px; margin-bottom: 12px;"></div>
-
             <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="inline-toolbar-enabled-toggle" style="width: 18px; height: 18px; margin-top: 2px; flex-shrink: 0;">
               <div style="flex: 1;">
@@ -2872,9 +2863,8 @@ window.__worklog_openAt = openOverlayAt;
 window.__worklog_injectTopMenu = injectTopMenu;
 
 
-/* ===== Inline tools 注入到 /issues/{id} 頁面 (整合自 PJ_startToEndDate + PJ_workingHours) === */
+/* ===== Inline tools 注入到 /issues/{id} 頁面 (整合自 PJ_workingHours) ===== */
 
-const INLINE_FORM_ID = "__worklog_inline_form";
 const INLINE_TOOLBAR_ID = "__worklog_inline_toolbar";
 const INLINE_MODAL_ID = "__worklog_inline_modal";
 const INLINE_TOAST_ID = "__worklog_inline_toast";
@@ -2891,21 +2881,12 @@ function getIssueIdFromPath() {
 /* ----- 入口：boot 階段呼叫 / toggle ON 立即呼叫 ----- */
 function installInlineTools() {
   if (!isIssueDetailPage()) return;
-  // 兩個獨立 toggle: quick edit form 與 worktime toolbar 各自 default true
-  if (Store.get("inline_quick_edit_enabled", true) !== false) {
-    installQuickEditForm();
-  }
   if (Store.get("inline_toolbar_enabled", true) !== false) {
     installWorktimeToolbar();
   }
 }
 
-/* ----- 反向：個別 unmount ----- */
-function uninstallQuickEditForm() {
-  const form = document.getElementById(INLINE_FORM_ID);
-  if (form) form.remove();
-}
-
+/* ----- 反向：unmount ----- */
 function uninstallWorktimeToolbar() {
   const marker = document.getElementById(INLINE_TOOLBAR_ID);
   if (marker) marker.remove();
@@ -2915,8 +2896,6 @@ function uninstallWorktimeToolbar() {
 }
 
 function uninstallInlineTools() {
-  // 全部 unmount (保留作為公用 API, 內部呼叫個別 uninstall)
-  uninstallQuickEditForm();
   uninstallWorktimeToolbar();
   // 注意:不移除 #__worklog_inline_modal 與 toast container (race + 惰性元素)
 }
@@ -2941,83 +2920,6 @@ function inlineToast(message, opts) {
     toast.classList.add("pj-inline-toast-fading");
     setTimeout(() => toast.remove(), 220);
   }, duration);
-}
-
-/* ----- Quick edit form（替代 PJ_startToEndDate）----- */
-function installQuickEditForm() {
-  const header = document.getElementById("issue_detail_header");
-  if (!header || document.getElementById(INLINE_FORM_ID)) return;
-  const issueId = getIssueIdFromPath();
-  if (!issueId) return;
-
-  const form = document.createElement("form");
-  form.id = INLINE_FORM_ID;
-  form.className = "pj-inline-form";
-  form.setAttribute("autocomplete", "off");
-  form.innerHTML = `
-    <input type="text" data-field="estimated_hours" placeholder="預估工時" class="pj-inline-input pj-inline-input-narrow">
-    <input type="text" data-field="start_date" placeholder="開始 yyyyMMdd" class="pj-inline-input">
-    <input type="text" data-field="due_date" placeholder="完成 yyyyMMdd" class="pj-inline-input">
-    <button type="submit" class="pj-inline-button">更新</button>
-  `;
-  header.prepend(form);
-
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const get = (k) => form.querySelector(`[data-field="${k}"]`).value.trim();
-    const startDate = normalizeInlineDate(get("start_date"));
-    const dueDate = normalizeInlineDate(get("due_date"));
-    const estimated = get("estimated_hours");
-    if (!startDate || !dueDate) {
-      inlineToast("日期格式錯誤（請用 yyyyMMdd 或 yyyy-MM-dd）", { type: "error" });
-      return;
-    }
-    const payload = {
-      issue: {
-        id: issueId,
-        estimated_hours: estimated,
-        start_date: startDate,
-        due_date: dueDate,
-      },
-    };
-    // 若 issue UI 顯示無指派者，自動帶當前 user（取代原 PJ_ easy_autocompletes 搜尋）
-    const uiAssigned = document.querySelector('span[data-name="issue[assigned_to_id]"]');
-    const uiAssignedId = uiAssigned?.getAttribute("data-value");
-    if (!uiAssignedId) {
-      try {
-        payload.issue.assigned_to_id = await getCurrentUserId();
-      } catch {}
-    }
-    const submitBtn = form.querySelector("button[type='submit']");
-    submitBtn.disabled = true;
-    submitBtn.textContent = "送出中...";
-    try {
-      await redmineFetch(`/issues/${issueId}.json`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      inlineToast(`已更新 issue #${issueId} 起迄日`);
-      // 清空 input，視覺反饋已送出
-      form.querySelectorAll(".pj-inline-input").forEach((el) => (el.value = ""));
-    } catch (err) {
-      inlineToast(`更新失敗：${err.message || err}`, { type: "error" });
-    } finally {
-      submitBtn.disabled = false;
-      submitBtn.textContent = "更新";
-    }
-  });
-}
-
-function normalizeInlineDate(input) {
-  if (!input) return null;
-  const m = input.match(/^(\d{4})(\d{2})(\d{2})$/);
-  if (m) input = `${m[1]}-${m[2]}-${m[3]}`;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(input)) return null;
-  const d = new Date(input);
-  const [y, mo, da] = input.split("-").map(Number);
-  if (d.getFullYear() === y && d.getMonth() + 1 === mo && d.getDate() === da) return input;
-  return null;
 }
 
 /* ----- Worktime toolbar（替代 PJ_workingHours）----- */
@@ -3263,7 +3165,6 @@ function installInlineModal() {
 }
 
 const INLINE_CSS = `
-.pj-inline-form { display: inline-flex; gap: 6px; margin: 6px 0; align-items: center; flex-wrap: wrap; }
 .pj-inline-input, .pj-inline-textarea {
   padding: 6px 10px;
   border: 1px solid #ccc;
@@ -3275,7 +3176,6 @@ const INLINE_CSS = `
   box-sizing: border-box;
 }
 .pj-inline-input { width: 130px; }
-.pj-inline-input-narrow { width: 100px; }
 .pj-inline-textarea { width: 100%; min-height: 64px; resize: vertical; }
 .pj-inline-input:focus, .pj-inline-textarea:focus {
   outline: 2px solid #d13a3a;
@@ -3357,8 +3257,6 @@ const INLINE_CSS = `
 
 window.__worklog_installInlineTools = installInlineTools;
 window.__worklog_uninstallInlineTools = uninstallInlineTools;
-window.__worklog_installQuickEditForm = installQuickEditForm;
-window.__worklog_uninstallQuickEditForm = uninstallQuickEditForm;
 window.__worklog_installWorktimeToolbar = installWorktimeToolbar;
 window.__worklog_uninstallWorktimeToolbar = uninstallWorktimeToolbar;
 window.__worklog_installInlineModal = installInlineModal;
@@ -3370,8 +3268,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605181119";
-const APP_BUILD_TIME = "2026-05-18 11:19";
+const APP_VERSION = "1.0.202605211459";
+const APP_BUILD_TIME = "2026-05-21 14:59";
 
 const state = {
   localToday: localDateString(new Date()),
@@ -3501,8 +3399,6 @@ const elements = {
   inlineToolbarOffsetsStatus: document.getElementById("inline-toolbar-offsets-status"),
   inlineDefaultPhraseSelect: document.getElementById("inline-default-phrase-select"),
   inlineDefaultPhraseStatus: document.getElementById("inline-default-phrase-status"),
-  inlineQuickEditEnabledToggle: document.getElementById("inline-quick-edit-enabled-toggle"),
-  inlineQuickEditEnabledStatus: document.getElementById("inline-quick-edit-enabled-status"),
   inlineToolbarEnabledToggle: document.getElementById("inline-toolbar-enabled-toggle"),
   inlineToolbarEnabledStatus: document.getElementById("inline-toolbar-enabled-status"),
 };
@@ -5485,11 +5381,7 @@ let __inlineToolsHandlersBound = false;
 function renderInlineToolsView() {
   if (!elements.inlineToolbarOffsetsInput) return;
 
-  // 0. Enabled toggles：從 Store 載入當前 checked 狀態（每次切到 view 都同步）
-  if (elements.inlineQuickEditEnabledToggle) {
-    const enabled = Store.get("inline_quick_edit_enabled", true) !== false;
-    elements.inlineQuickEditEnabledToggle.checked = enabled;
-  }
+  // 0. Enabled toggle：從 Store 載入當前 checked 狀態（每次切到 view 都同步）
   if (elements.inlineToolbarEnabledToggle) {
     const enabled = Store.get("inline_toolbar_enabled", true) !== false;
     elements.inlineToolbarEnabledToggle.checked = enabled;
@@ -5518,26 +5410,6 @@ function renderInlineToolsView() {
   // 3. 綁定 handlers (只綁一次)
   if (__inlineToolsHandlersBound) return;
   __inlineToolsHandlersBound = true;
-
-  // Quick Edit Form toggle: persist + 立即 install/uninstall
-  if (elements.inlineQuickEditEnabledToggle) {
-    elements.inlineQuickEditEnabledToggle.addEventListener("change", () => {
-      const v = elements.inlineQuickEditEnabledToggle.checked;
-      Store.set("inline_quick_edit_enabled", v);
-      const status = elements.inlineQuickEditEnabledStatus;
-      if (v) {
-        if (typeof window.__worklog_installQuickEditForm === "function") {
-          window.__worklog_installQuickEditForm();
-        }
-        if (status) status.textContent = "已啟用：當前 issue 頁立即注入；非 issue 頁需切到 issue 頁才會看到";
-      } else {
-        if (typeof window.__worklog_uninstallQuickEditForm === "function") {
-          window.__worklog_uninstallQuickEditForm();
-        }
-        if (status) status.textContent = "已停用：已移除 quick-edit form";
-      }
-    });
-  }
 
   // Worktime Toolbar toggle: persist + 立即 install/uninstall
   if (elements.inlineToolbarEnabledToggle) {
@@ -6494,6 +6366,10 @@ function boot() {
   Store.del('inline_default_comment');
   // 舊單一 toggle 已拆為 quick_edit / toolbar 兩個獨立 toggle
   Store.del('inline_tools_enabled');
+  // Quick Edit 表單功能移除, 清舊獨立 toggle key
+  Store.del('inline_quick_edit_enabled');
+  // 移除舊版 inject 過的 quick edit form (本版已移除該功能, 不需等 F5)
+  document.getElementById('__worklog_inline_form')?.remove();
   console.log('[LawPJ Worklog] userscript 已就緒（從上方 menu 進入工時助手）');
 }
 if (document.readyState === 'loading') {

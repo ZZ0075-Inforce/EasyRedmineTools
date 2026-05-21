@@ -130,8 +130,6 @@ const elements = {
   inlineToolbarOffsetsStatus: document.getElementById("inline-toolbar-offsets-status"),
   inlineDefaultPhraseSelect: document.getElementById("inline-default-phrase-select"),
   inlineDefaultPhraseStatus: document.getElementById("inline-default-phrase-status"),
-  inlineQuickEditEnabledToggle: document.getElementById("inline-quick-edit-enabled-toggle"),
-  inlineQuickEditEnabledStatus: document.getElementById("inline-quick-edit-enabled-status"),
   inlineToolbarEnabledToggle: document.getElementById("inline-toolbar-enabled-toggle"),
   inlineToolbarEnabledStatus: document.getElementById("inline-toolbar-enabled-status"),
 };
@@ -2121,11 +2119,7 @@ let __inlineToolsHandlersBound = false;
 function renderInlineToolsView() {
   if (!elements.inlineToolbarOffsetsInput) return;
 
-  // 0. Enabled toggles：從 Store 載入當前 checked 狀態（每次切到 view 都同步）
-  if (elements.inlineQuickEditEnabledToggle) {
-    const enabled = Store.get("inline_quick_edit_enabled", true) !== false;
-    elements.inlineQuickEditEnabledToggle.checked = enabled;
-  }
+  // 0. Enabled toggle：從 Store 載入當前 checked 狀態（每次切到 view 都同步）
   if (elements.inlineToolbarEnabledToggle) {
     const enabled = Store.get("inline_toolbar_enabled", true) !== false;
     elements.inlineToolbarEnabledToggle.checked = enabled;
@@ -2154,26 +2148,6 @@ function renderInlineToolsView() {
   // 3. 綁定 handlers (只綁一次)
   if (__inlineToolsHandlersBound) return;
   __inlineToolsHandlersBound = true;
-
-  // Quick Edit Form toggle: persist + 立即 install/uninstall
-  if (elements.inlineQuickEditEnabledToggle) {
-    elements.inlineQuickEditEnabledToggle.addEventListener("change", () => {
-      const v = elements.inlineQuickEditEnabledToggle.checked;
-      Store.set("inline_quick_edit_enabled", v);
-      const status = elements.inlineQuickEditEnabledStatus;
-      if (v) {
-        if (typeof window.__worklog_installQuickEditForm === "function") {
-          window.__worklog_installQuickEditForm();
-        }
-        if (status) status.textContent = "已啟用：當前 issue 頁立即注入；非 issue 頁需切到 issue 頁才會看到";
-      } else {
-        if (typeof window.__worklog_uninstallQuickEditForm === "function") {
-          window.__worklog_uninstallQuickEditForm();
-        }
-        if (status) status.textContent = "已停用：已移除 quick-edit form";
-      }
-    });
-  }
 
   // Worktime Toolbar toggle: persist + 立即 install/uninstall
   if (elements.inlineToolbarEnabledToggle) {

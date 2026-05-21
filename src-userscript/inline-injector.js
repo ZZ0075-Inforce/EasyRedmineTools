@@ -1,6 +1,5 @@
-/* ===== Inline tools 注入到 /issues/{id} 頁面 (整合自 PJ_startToEndDate + PJ_workingHours) === */
+/* ===== Inline tools 注入到 /issues/{id} 頁面 (整合自 PJ_workingHours) ===== */
 
-const INLINE_FORM_ID = "__worklog_inline_form";
 const INLINE_TOOLBAR_ID = "__worklog_inline_toolbar";
 const INLINE_MODAL_ID = "__worklog_inline_modal";
 const INLINE_TOAST_ID = "__worklog_inline_toast";
@@ -17,21 +16,12 @@ function getIssueIdFromPath() {
 /* ----- 入口：boot 階段呼叫 / toggle ON 立即呼叫 ----- */
 function installInlineTools() {
   if (!isIssueDetailPage()) return;
-  // 兩個獨立 toggle: quick edit form 與 worktime toolbar 各自 default true
-  if (Store.get("inline_quick_edit_enabled", true) !== false) {
-    installQuickEditForm();
-  }
   if (Store.get("inline_toolbar_enabled", true) !== false) {
     installWorktimeToolbar();
   }
 }
 
-/* ----- 反向：個別 unmount ----- */
-function uninstallQuickEditForm() {
-  const form = document.getElementById(INLINE_FORM_ID);
-  if (form) form.remove();
-}
-
+/* ----- 反向：unmount ----- */
 function uninstallWorktimeToolbar() {
   const marker = document.getElementById(INLINE_TOOLBAR_ID);
   if (marker) marker.remove();
@@ -41,8 +31,6 @@ function uninstallWorktimeToolbar() {
 }
 
 function uninstallInlineTools() {
-  // 全部 unmount (保留作為公用 API, 內部呼叫個別 uninstall)
-  uninstallQuickEditForm();
   uninstallWorktimeToolbar();
   // 注意:不移除 #__worklog_inline_modal 與 toast container (race + 惰性元素)
 }
@@ -67,83 +55,6 @@ function inlineToast(message, opts) {
     toast.classList.add("pj-inline-toast-fading");
     setTimeout(() => toast.remove(), 220);
   }, duration);
-}
-
-/* ----- Quick edit form（替代 PJ_startToEndDate）----- */
-function installQuickEditForm() {
-  const header = document.getElementById("issue_detail_header");
-  if (!header || document.getElementById(INLINE_FORM_ID)) return;
-  const issueId = getIssueIdFromPath();
-  if (!issueId) return;
-
-  const form = document.createElement("form");
-  form.id = INLINE_FORM_ID;
-  form.className = "pj-inline-form";
-  form.setAttribute("autocomplete", "off");
-  form.innerHTML = `
-    <input type="text" data-field="estimated_hours" placeholder="預估工時" class="pj-inline-input pj-inline-input-narrow">
-    <input type="text" data-field="start_date" placeholder="開始 yyyyMMdd" class="pj-inline-input">
-    <input type="text" data-field="due_date" placeholder="完成 yyyyMMdd" class="pj-inline-input">
-    <button type="submit" class="pj-inline-button">更新</button>
-  `;
-  header.prepend(form);
-
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const get = (k) => form.querySelector(`[data-field="${k}"]`).value.trim();
-    const startDate = normalizeInlineDate(get("start_date"));
-    const dueDate = normalizeInlineDate(get("due_date"));
-    const estimated = get("estimated_hours");
-    if (!startDate || !dueDate) {
-      inlineToast("日期格式錯誤（請用 yyyyMMdd 或 yyyy-MM-dd）", { type: "error" });
-      return;
-    }
-    const payload = {
-      issue: {
-        id: issueId,
-        estimated_hours: estimated,
-        start_date: startDate,
-        due_date: dueDate,
-      },
-    };
-    // 若 issue UI 顯示無指派者，自動帶當前 user（取代原 PJ_ easy_autocompletes 搜尋）
-    const uiAssigned = document.querySelector('span[data-name="issue[assigned_to_id]"]');
-    const uiAssignedId = uiAssigned?.getAttribute("data-value");
-    if (!uiAssignedId) {
-      try {
-        payload.issue.assigned_to_id = await getCurrentUserId();
-      } catch {}
-    }
-    const submitBtn = form.querySelector("button[type='submit']");
-    submitBtn.disabled = true;
-    submitBtn.textContent = "送出中...";
-    try {
-      await redmineFetch(`/issues/${issueId}.json`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      inlineToast(`已更新 issue #${issueId} 起迄日`);
-      // 清空 input，視覺反饋已送出
-      form.querySelectorAll(".pj-inline-input").forEach((el) => (el.value = ""));
-    } catch (err) {
-      inlineToast(`更新失敗：${err.message || err}`, { type: "error" });
-    } finally {
-      submitBtn.disabled = false;
-      submitBtn.textContent = "更新";
-    }
-  });
-}
-
-function normalizeInlineDate(input) {
-  if (!input) return null;
-  const m = input.match(/^(\d{4})(\d{2})(\d{2})$/);
-  if (m) input = `${m[1]}-${m[2]}-${m[3]}`;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(input)) return null;
-  const d = new Date(input);
-  const [y, mo, da] = input.split("-").map(Number);
-  if (d.getFullYear() === y && d.getMonth() + 1 === mo && d.getDate() === da) return input;
-  return null;
 }
 
 /* ----- Worktime toolbar（替代 PJ_workingHours）----- */
@@ -389,7 +300,6 @@ function installInlineModal() {
 }
 
 const INLINE_CSS = `
-.pj-inline-form { display: inline-flex; gap: 6px; margin: 6px 0; align-items: center; flex-wrap: wrap; }
 .pj-inline-input, .pj-inline-textarea {
   padding: 6px 10px;
   border: 1px solid #ccc;
@@ -401,7 +311,6 @@ const INLINE_CSS = `
   box-sizing: border-box;
 }
 .pj-inline-input { width: 130px; }
-.pj-inline-input-narrow { width: 100px; }
 .pj-inline-textarea { width: 100%; min-height: 64px; resize: vertical; }
 .pj-inline-input:focus, .pj-inline-textarea:focus {
   outline: 2px solid #d13a3a;
@@ -483,8 +392,6 @@ const INLINE_CSS = `
 
 window.__worklog_installInlineTools = installInlineTools;
 window.__worklog_uninstallInlineTools = uninstallInlineTools;
-window.__worklog_installQuickEditForm = installQuickEditForm;
-window.__worklog_uninstallQuickEditForm = uninstallQuickEditForm;
 window.__worklog_installWorktimeToolbar = installWorktimeToolbar;
 window.__worklog_uninstallWorktimeToolbar = uninstallWorktimeToolbar;
 window.__worklog_installInlineModal = installInlineModal;
