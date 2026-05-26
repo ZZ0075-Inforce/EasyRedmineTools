@@ -391,6 +391,10 @@ def main() -> None:
         flags=re.MULTILINE,
     )
     tps_js = read(SRC / "time-entry-preview-session.js")
+    time_entry_h_js = read(SRC / "time-entry-handlers.js")
+    issue_h_js = read(SRC / "issue-handlers.js")
+    catalog_h_js = read(SRC / "catalog-handlers.js")
+    storage_h_js = read(SRC / "storage-handlers.js")
     runtime_js = read(SRC / "runtime.js")
     settings_js = read(SRC / "settings-patch.js")
     overlay_js = read(SRC / "overlay.js")
@@ -414,6 +418,10 @@ def main() -> None:
     settings_js = prefix_classes(settings_js, app_classes)
     runtime_js = prefix_classes(runtime_js, app_classes)
     tps_js = prefix_classes(tps_js, app_classes)
+    time_entry_h_js = prefix_classes(time_entry_h_js, app_classes)
+    issue_h_js = prefix_classes(issue_h_js, app_classes)
+    catalog_h_js = prefix_classes(catalog_h_js, app_classes)
+    storage_h_js = prefix_classes(storage_h_js, app_classes)
     menu_injector_js = prefix_classes(menu_injector_js, app_classes)
     inline_injector_js = prefix_classes(inline_injector_js, app_classes)
 
@@ -450,6 +458,14 @@ def main() -> None:
         f"const APP_CSS = `{js_string(scoped_css)}`;",
         "",
         tps_js,
+        "",
+        time_entry_h_js,
+        "",
+        issue_h_js,
+        "",
+        catalog_h_js,
+        "",
+        storage_h_js,
         "",
         runtime_js,
         "",
