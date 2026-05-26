@@ -208,3 +208,17 @@ Easy Redmine `/issues.json` 對 filter shorthand 不照辦——直接 `?assigne
 - `phrases_store.py`, `saved_queries_store.py` — 本機 JSON 檔案 CRUD
 - `worklog_selftest.py`, `tests/` — 後端測試（功能已移到 client，無對應測試）
 - `config.example.json` — server 配置範本
+
+## Agent skills
+
+### Issue tracker
+
+Issues 與 PRD 存在 GitHub Issues（`ZZ0075-Inforce/EasyRedmineTools`），透過 `gh` CLI 操作。詳見 `docs/agents/issue-tracker.md`。
+
+### Triage labels
+
+採用預設五個英文 label（`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`）。詳見 `docs/agents/triage-labels.md`。
+
+### Domain docs
+
+Single-context layout：root 一份 `CONTEXT.md` + `docs/adr/`。詳見 `docs/agents/domain.md`。
