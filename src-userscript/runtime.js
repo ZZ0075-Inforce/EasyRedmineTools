@@ -234,28 +234,7 @@ async function getCurrentUserId() {
   return __currentUserPromise;
 }
 
-/* ===== Preview session（瀏覽器端 token + 內容簽章） ======================== */
-const PREVIEW_SESSIONS = new Map();  // token → { spent_on, signature }
-
-async function sha256Hex(text) {
-  const buf = new TextEncoder().encode(text);
-  const hash = await crypto.subtle.digest("SHA-256", buf);
-  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("");
-}
-
-async function canonicalSignature(spentOn, entries) {
-  const canon = {
-    spent_on: spentOn,
-    entries: entries.map(e => ({
-      issue_id: Number(e.issue_id),
-      hours: String(e.hours || ""),
-      activity_id: e.activity_id === "" || e.activity_id == null ? null : Number(e.activity_id),
-      comments: String(e.comments || ""),
-    })),
-  };
-  return sha256Hex(JSON.stringify(canon));
-}
-
+/* ===== Random token utility（preview session 與 issue-templates / saved-queries 共用） === */
 function randomToken() {
   const b = crypto.getRandomValues(new Uint8Array(18));
   return btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -614,22 +593,13 @@ const handlers = {
       }
     }
 
-    const token = randomToken();
-    const signature = await canonicalSignature(spentOn, entries);
-    PREVIEW_SESSIONS.set(token, { spent_on: spentOn, signature, ts: Date.now() });
-    // 30 分鐘後自動回收
-    setTimeout(() => PREVIEW_SESSIONS.delete(token), 30 * 60 * 1000);
-
+    const { token } = await TimeEntryPreviewSession.create(spentOn, entries);
     return { preview_token: token, spent_on: spentOn, entries, warnings };
   },
 
   async "POST /api/time-entries/commit"(_params, body) {
     const token = String(body.preview_token || "");
-    const session = PREVIEW_SESSIONS.get(token);
-    if (!session) throw new Error("預覽已過期，請重新預覽");
-    if (session.spent_on !== body.spent_on) throw new Error("工時日期與預覽時不同，請重新預覽");
-    const sig = await canonicalSignature(body.spent_on, body.entries);
-    if (sig !== session.signature) throw new Error("內容與預覽時不同，請重新預覽");
+    await TimeEntryPreviewSession.validate(token, body.spent_on, body.entries);
 
     const results = [];
     for (const e of body.entries) {
@@ -658,7 +628,7 @@ const handlers = {
         results.push({ ...base, error: err.message });
       }
     }
-    PREVIEW_SESSIONS.delete(token);
+    TimeEntryPreviewSession.consume(token);
     return { spent_on: body.spent_on, results };
   },
 

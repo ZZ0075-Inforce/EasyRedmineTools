@@ -390,6 +390,7 @@ def main() -> None:
         count=1,
         flags=re.MULTILINE,
     )
+    tps_js = read(SRC / "time-entry-preview-session.js")
     runtime_js = read(SRC / "runtime.js")
     settings_js = read(SRC / "settings-patch.js")
     overlay_js = read(SRC / "overlay.js")
@@ -412,6 +413,7 @@ def main() -> None:
     overlay_js = prefix_classes(overlay_js, app_classes)
     settings_js = prefix_classes(settings_js, app_classes)
     runtime_js = prefix_classes(runtime_js, app_classes)
+    tps_js = prefix_classes(tps_js, app_classes)
     menu_injector_js = prefix_classes(menu_injector_js, app_classes)
     inline_injector_js = prefix_classes(inline_injector_js, app_classes)
 
@@ -446,6 +448,8 @@ def main() -> None:
         "",
         f"const APP_HTML = `{js_string(html_body)}`;",
         f"const APP_CSS = `{js_string(scoped_css)}`;",
+        "",
+        tps_js,
         "",
         runtime_js,
         "",

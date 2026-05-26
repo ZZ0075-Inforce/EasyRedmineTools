@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605211542
+// @version      1.0.202605261635
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -1580,6 +1580,60 @@ const APP_CSS = `#__worklog_root {
         }
       }`;
 
+/* ===== TimeEntryPreviewSession：兩階段預覽/提交（token + SHA-256 簽章 + TTL） =====
+ * 把 preview/commit 兩個 handler 共用的 session 狀態集中在這裡：
+ *   - create(spentOn, entries)  → { token }
+ *   - validate(token, spentOn, entries)  → throws on mismatch（過期 / 日期不一 / 內容不一）
+ *   - consume(token)  → 移除（idempotent）
+ * randomToken 留在 runtime.js（其他 handler 還在用，視為共用 utility）。
+ */
+const TimeEntryPreviewSession = (() => {
+  const SESSIONS = new Map();  // token → { spent_on, signature, ts }
+  const TTL_MS = 30 * 60 * 1000;
+
+  async function sha256Hex(text) {
+    const buf = new TextEncoder().encode(text);
+    const hash = await crypto.subtle.digest("SHA-256", buf);
+    return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  async function canonicalSignature(spentOn, entries) {
+    const canon = {
+      spent_on: spentOn,
+      entries: entries.map(e => ({
+        issue_id: Number(e.issue_id),
+        hours: String(e.hours || ""),
+        activity_id: e.activity_id === "" || e.activity_id == null ? null : Number(e.activity_id),
+        comments: String(e.comments || ""),
+      })),
+    };
+    return sha256Hex(JSON.stringify(canon));
+  }
+
+  async function create(spentOn, entries) {
+    const token = randomToken();
+    const signature = await canonicalSignature(spentOn, entries);
+    SESSIONS.set(token, { spent_on: spentOn, signature, ts: Date.now() });
+    setTimeout(() => SESSIONS.delete(token), TTL_MS);
+    return { token };
+  }
+
+  async function validate(token, spentOn, entries) {
+    const session = SESSIONS.get(token);
+    if (!session) throw new Error("預覽已過期，請重新預覽");
+    if (session.spent_on !== spentOn) throw new Error("工時日期與預覽時不同，請重新預覽");
+    const sig = await canonicalSignature(spentOn, entries);
+    if (sig !== session.signature) throw new Error("內容與預覽時不同，請重新預覽");
+  }
+
+  function consume(token) {
+    SESSIONS.delete(token);
+  }
+
+  return { create, validate, consume };
+})();
+
+
 /* ===== Storage layer (GM 或 localStorage fallback) ========================= */
 const Store = {
   get(key, fallback) {
@@ -1816,28 +1870,7 @@ async function getCurrentUserId() {
   return __currentUserPromise;
 }
 
-/* ===== Preview session（瀏覽器端 token + 內容簽章） ======================== */
-const PREVIEW_SESSIONS = new Map();  // token → { spent_on, signature }
-
-async function sha256Hex(text) {
-  const buf = new TextEncoder().encode(text);
-  const hash = await crypto.subtle.digest("SHA-256", buf);
-  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("");
-}
-
-async function canonicalSignature(spentOn, entries) {
-  const canon = {
-    spent_on: spentOn,
-    entries: entries.map(e => ({
-      issue_id: Number(e.issue_id),
-      hours: String(e.hours || ""),
-      activity_id: e.activity_id === "" || e.activity_id == null ? null : Number(e.activity_id),
-      comments: String(e.comments || ""),
-    })),
-  };
-  return sha256Hex(JSON.stringify(canon));
-}
-
+/* ===== Random token utility（preview session 與 issue-templates / saved-queries 共用） === */
 function randomToken() {
   const b = crypto.getRandomValues(new Uint8Array(18));
   return btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -2196,22 +2229,13 @@ const handlers = {
       }
     }
 
-    const token = randomToken();
-    const signature = await canonicalSignature(spentOn, entries);
-    PREVIEW_SESSIONS.set(token, { spent_on: spentOn, signature, ts: Date.now() });
-    // 30 分鐘後自動回收
-    setTimeout(() => PREVIEW_SESSIONS.delete(token), 30 * 60 * 1000);
-
+    const { token } = await TimeEntryPreviewSession.create(spentOn, entries);
     return { preview_token: token, spent_on: spentOn, entries, warnings };
   },
 
   async "POST /api/time-entries/commit"(_params, body) {
     const token = String(body.preview_token || "");
-    const session = PREVIEW_SESSIONS.get(token);
-    if (!session) throw new Error("預覽已過期，請重新預覽");
-    if (session.spent_on !== body.spent_on) throw new Error("工時日期與預覽時不同，請重新預覽");
-    const sig = await canonicalSignature(body.spent_on, body.entries);
-    if (sig !== session.signature) throw new Error("內容與預覽時不同，請重新預覽");
+    await TimeEntryPreviewSession.validate(token, body.spent_on, body.entries);
 
     const results = [];
     for (const e of body.entries) {
@@ -2240,7 +2264,7 @@ const handlers = {
         results.push({ ...base, error: err.message });
       }
     }
-    PREVIEW_SESSIONS.delete(token);
+    TimeEntryPreviewSession.consume(token);
     return { spent_on: body.spent_on, results };
   },
 
@@ -3316,8 +3340,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605211542";
-const APP_BUILD_TIME = "2026-05-21 15:42";
+const APP_VERSION = "1.0.202605261635";
+const APP_BUILD_TIME = "2026-05-26 16:35";
 
 const state = {
   localToday: localDateString(new Date()),
