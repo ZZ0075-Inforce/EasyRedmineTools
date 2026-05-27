@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605271747
+// @version      1.0.202605271754
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -3398,8 +3398,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605271747";
-const APP_BUILD_TIME = "2026-05-27 17:47";
+const APP_VERSION = "1.0.202605271754";
+const APP_BUILD_TIME = "2026-05-27 17:54";
 
 const state = {
   localToday: localDateString(new Date()),
@@ -3567,7 +3567,7 @@ Renders.subscribe(["schedule"], () => renderAlerts());
 
 // 註冊 savedQueries 訂閱（新增 PJ 篩選器後 pj-source-tab 列與 drawer 同步刷新）
 Renders.subscribe(["savedQueries"], () => renderSourceTabs());
-Renders.subscribe(["savedQueries"], () => renderSourcesDrawer());
+Renders.subscribe(["savedQueries"], () => SavedQueryManager.render());
 
 // 註冊 issueTemplateDefaults 訂閱（toggle default 後 entry table 的 star 圖示要更新）
 Renders.subscribe(["issueTemplateDefaults"], () => renderTable());
@@ -4255,6 +4255,117 @@ const CommitModal = (() => {
   }
 
   return { open, close, init };
+})();
+
+/* ===== SavedQueryManager：PJ 篩選器 view CRUD =============================
+ * 公開 render() / init() 兩個 entry; render() 也兼 list 內 remove 按鈕的
+ * inline binding（render → bind 同一輪 click 觸發 remove flow）。
+ * removeQuery 內部會切 currentSource + refetch issues 跨 slice，所以呼叫
+ * 端跟 init() 內仍走 renderAll() 不走 notify("savedQueries")。
+ */
+const SavedQueryManager = (() => {
+  function render() {
+    if (!state.savedQueries.length) {
+      elements.savedQueriesList.innerHTML = emptyStateHtml({
+        icon: "🔍",
+        title: "尚未加入任何 PJ 篩選器",
+        hint: "先去 Redmine 建立自訂查詢，從網址 ?query_id=X 抓 ID 與顯示名稱填進上方表單。",
+      });
+    } else {
+      elements.savedQueriesList.innerHTML = state.savedQueries
+        .map(
+          (query) => `
+            <div class="pj-item-card">
+              <div class="pj-item-head">
+                <div>
+                  <h3 class="pj-item-title">${escapeHtml(query.name)}</h3>
+                  <div class="muted">query_id: ${query.query_id}</div>
+                </div>
+                <button class="pj-danger-button" data-remove-query="${query.query_id}">移除</button>
+              </div>
+            </div>
+          `
+        )
+        .join("");
+    }
+
+    for (const btn of elements.savedQueriesList.querySelectorAll("[data-remove-query]")) {
+      btn.addEventListener("click", async (event) => {
+        const qid = Number(event.currentTarget.dataset.removeQuery);
+        const target = state.savedQueries.find((q) => q.query_id === qid);
+        const name = target?.name || `#${qid}`;
+        const ok = await showConfirmModal({
+          title: "移除 PJ 篩選器",
+          body: `確定要移除「${name}」嗎？此操作只會從工具裡拿掉，不會影響 Redmine 本身的查詢。`,
+          confirmText: "移除",
+          danger: true,
+        });
+        if (!ok) return;
+        try {
+          await withLoading("移除 PJ 篩選器...", () => removeQuery(qid));
+          showToast("已移除 PJ 篩選器");
+          renderAll();  // pj-source-tabs + saved-queries-list + 可能切到 mine 後的 issue 列表
+        } catch (error) {
+          state.sourcesWarnings = [error.message || String(error)];
+          renderAlerts();
+        }
+      });
+    }
+  }
+
+  async function addQuery() {
+    const name = elements.queryNameInput.value.trim();
+    const rawId = elements.queryIdInput.value.trim();
+    if (!name) {
+      state.sourcesWarnings = ["請填寫 PJ 篩選器名稱。"];
+      renderAlerts();
+      return;
+    }
+    if (!rawId) {
+      state.sourcesWarnings = ["請填寫 query_id。"];
+      renderAlerts();
+      return;
+    }
+    const data = await fetchJson("/api/saved-queries", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, query_id: Number(rawId) }),
+    });
+    const query = data.query;
+    const existingIndex = state.savedQueries.findIndex((item) => item.query_id === query.query_id);
+    if (existingIndex >= 0) {
+      state.savedQueries[existingIndex] = query;
+    } else {
+      state.savedQueries.push(query);
+    }
+    state.sourcesWarnings = [];
+    elements.queryNameInput.value = "";
+    elements.queryIdInput.value = "";
+  }
+
+  async function removeQuery(queryId) {
+    await fetchJson(`/api/saved-queries/${queryId}`, { method: "DELETE" });
+    state.savedQueries = state.savedQueries.filter((item) => item.query_id !== queryId);
+    if (state.currentSource.type === "query" && state.currentSource.id === queryId) {
+      state.currentSource = { type: "mine" };
+      await fetchIssues({ resetSelected: true });
+    }
+  }
+
+  function init() {
+    elements.queryAddButton.addEventListener("click", async () => {
+      try {
+        await withLoading("加入 PJ 篩選器中...", addQuery);
+        if (!state.sourcesWarnings.length) showToast("已新增 PJ 篩選器");
+        Renders.notify("savedQueries");
+      } catch (error) {
+        state.sourcesWarnings = [error.message || String(error)];
+        renderAlerts();
+      }
+    });
+  }
+
+  return { render, init };
 })();
 
 const THEME_KEY = "lawpj.theme";
@@ -5472,62 +5583,13 @@ async function toggleIssueDefault(issueId) {
   showToast("已設為此 issue 的 default — 下次勾入會自動套用");
 }
 
-function renderSourcesDrawer() {
-  if (!state.savedQueries.length) {
-    elements.savedQueriesList.innerHTML = emptyStateHtml({
-      icon: "🔍",
-      title: "尚未加入任何 PJ 篩選器",
-      hint: "先去 Redmine 建立自訂查詢，從網址 ?query_id=X 抓 ID 與顯示名稱填進上方表單。",
-    });
-  } else {
-    elements.savedQueriesList.innerHTML = state.savedQueries
-      .map(
-        (query) => `
-          <div class="pj-item-card">
-            <div class="pj-item-head">
-              <div>
-                <h3 class="pj-item-title">${escapeHtml(query.name)}</h3>
-                <div class="muted">query_id: ${query.query_id}</div>
-              </div>
-              <button class="pj-danger-button" data-remove-query="${query.query_id}">移除</button>
-            </div>
-          </div>
-        `
-      )
-      .join("");
-  }
-
-  for (const btn of elements.savedQueriesList.querySelectorAll("[data-remove-query]")) {
-    btn.addEventListener("click", async (event) => {
-      const qid = Number(event.currentTarget.dataset.removeQuery);
-      const target = state.savedQueries.find((q) => q.query_id === qid);
-      const name = target?.name || `#${qid}`;
-      const ok = await showConfirmModal({
-        title: "移除 PJ 篩選器",
-        body: `確定要移除「${name}」嗎？此操作只會從工具裡拿掉，不會影響 Redmine 本身的查詢。`,
-        confirmText: "移除",
-        danger: true,
-      });
-      if (!ok) return;
-      try {
-        await withLoading("移除 PJ 篩選器...", () => removeSavedQuery(qid));
-        showToast("已移除 PJ 篩選器");
-        renderAll();  // pj-source-tabs 與 saved-queries-list 同步刷新
-      } catch (error) {
-        state.sourcesWarnings = [error.message || String(error)];
-        renderAlerts();
-      }
-    });
-  }
-}
-
 function openSettings() {
   state.settingsOpen = true;
   elements.settingsModal.hidden = false;
   elements.settingsModal.removeAttribute("aria-hidden");
   applySettingsTab();
   renderPhrasesDrawer();
-  renderSourcesDrawer();
+  SavedQueryManager.render();
 }
 
 function closeSettings() {
@@ -5575,7 +5637,7 @@ function renderAll() {
   renderTable();
   if (state.sideView === "phrases") renderPhrasesDrawer();
   if (state.sideView === "inline-tools") renderInlineToolsView();
-  if (state.sideView === "sources") renderSourcesDrawer();
+  if (state.sideView === "sources") SavedQueryManager.render();
   if (state.sideView === "issue-batch") renderIssueBatchView();
   renderLoadingMask();
   updateButtons();
@@ -6195,44 +6257,6 @@ async function deletePhraseById(phraseId) {
   state.phrases = state.phrases.filter((item) => item.id !== phraseId);
 }
 
-async function addSavedQuery() {
-  const name = elements.queryNameInput.value.trim();
-  const rawId = elements.queryIdInput.value.trim();
-  if (!name) {
-    state.sourcesWarnings = ["請填寫 PJ 篩選器名稱。"];
-    renderAlerts();
-    return;
-  }
-  if (!rawId) {
-    state.sourcesWarnings = ["請填寫 query_id。"];
-    renderAlerts();
-    return;
-  }
-  const data = await fetchJson("/api/saved-queries", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, query_id: Number(rawId) }),
-  });
-  const query = data.query;
-  const existingIndex = state.savedQueries.findIndex((item) => item.query_id === query.query_id);
-  if (existingIndex >= 0) {
-    state.savedQueries[existingIndex] = query;
-  } else {
-    state.savedQueries.push(query);
-  }
-  state.sourcesWarnings = [];
-  elements.queryNameInput.value = "";
-  elements.queryIdInput.value = "";
-}
-
-async function removeSavedQuery(queryId) {
-  await fetchJson(`/api/saved-queries/${queryId}`, { method: "DELETE" });
-  state.savedQueries = state.savedQueries.filter((item) => item.query_id !== queryId);
-  if (state.currentSource.type === "query" && state.currentSource.id === queryId) {
-    state.currentSource = { type: "mine" };
-    await fetchIssues({ resetSelected: true });
-  }
-}
 
 function loadStoreSettings() {
   const Store = window.__worklog_Store;
@@ -6380,16 +6404,7 @@ elements.phraseCancelButton.addEventListener("click", () => {
   resetPhraseForm();
 });
 
-elements.queryAddButton.addEventListener("click", async () => {
-  try {
-    await withLoading("加入 PJ 篩選器中...", addSavedQuery);
-    if (!state.sourcesWarnings.length) showToast("已新增 PJ 篩選器");
-    Renders.notify("savedQueries");
-  } catch (error) {
-    state.sourcesWarnings = [error.message || String(error)];
-    renderAlerts();
-  }
-});
+SavedQueryManager.init();
 
 CommitModal.init({
   onConfirm: async () => {
