@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605270856
+// @version      1.0.202605270950
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -3366,8 +3366,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605270856";
-const APP_BUILD_TIME = "2026-05-27 08:56";
+const APP_VERSION = "1.0.202605270950";
+const APP_BUILD_TIME = "2026-05-27 09:50";
 
 const state = {
   localToday: localDateString(new Date()),
@@ -3483,6 +3483,62 @@ const PhraseMenu = (() => {
 
   return { toggleFor, close, isOpenFor, afterRender };
 })();
+
+/* ===== Renders：state-slice → render fn 訂閱 dispatcher ==================
+ * 取代「mutate state.X; renderAll()」的 shallow coordinator pattern。
+ * 一次 notify(slice) 只觸發訂閱該 slice 的 render，加上一個 cross-cutting bundle。
+ * 目前只有 phrases 走這條 — 其餘 state 暫時仍是 renderAll()。
+ */
+const Renders = (() => {
+  const subs = new Map();  // sliceKey → Set<fn>
+  let crossCutting = null;
+
+  function subscribe(keys, fn) {
+    for (const key of keys) {
+      if (!subs.has(key)) subs.set(key, new Set());
+      subs.get(key).add(fn);
+    }
+  }
+
+  function setCrossCutting(fn) {
+    crossCutting = fn;
+  }
+
+  function notify(...keys) {
+    const seen = new Set();
+    for (const key of keys) {
+      const fns = subs.get(key);
+      if (!fns) continue;
+      for (const fn of fns) {
+        if (seen.has(fn)) continue;
+        seen.add(fn);
+        try { fn(); } catch (err) { console.error("[Renders] subscriber error:", err); }
+      }
+    }
+    if (crossCutting) {
+      try { crossCutting(); } catch (err) { console.error("[Renders] cross-cutting error:", err); }
+    }
+  }
+
+  return { subscribe, setCrossCutting, notify };
+})();
+
+// 註冊 phrases 訂閱（render fn 是 function 宣告，hoisting 後可用）
+Renders.subscribe(["phrases"], () => renderTable());
+Renders.subscribe(["phrases"], () => renderPhrasesDrawer());
+Renders.subscribe(["phrases"], () => {
+  if (state.sideView === "inline-tools") renderInlineToolsView();
+});
+
+// Cross-cutting：每次 notify 結尾跑一次（match renderAll 尾段）
+Renders.setCrossCutting(() => {
+  renderLoadingMask();
+  updateButtons();
+  updateDailyTotalBadge();
+  updateSettingsTheme();
+  persistState();
+  PhraseMenu.afterRender();
+});
 
 let dragContext = null;
 const THEME_KEY = "lawpj.theme";
@@ -5199,7 +5255,7 @@ function renderPhrasesDrawer() {
       try {
         await withLoading("刪除工時模板中...", () => deletePhraseById(phraseId));
         showToast("已刪除工時模板");
-        renderAll();  // 整體刷新，entry 下拉同步少這筆
+        Renders.notify("phrases");
       } catch (error) {
         state.phrasesWarnings = [error.message || String(error)];
         renderAlerts();
@@ -6223,7 +6279,7 @@ elements.phraseAddButton.addEventListener("click", async () => {
     if (!state.phrasesWarnings.length) {
       showToast(wasEditing ? "已更新工時模板" : "已新增工時模板");
     }
-    renderAll();  // 整體 re-render 讓 entry 下拉、phrases-list 同步
+    Renders.notify("phrases");
   } catch (error) {
     state.phrasesWarnings = [error.message || String(error)];
     renderAlerts();
