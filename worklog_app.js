@@ -875,6 +875,21 @@ const AISuggestModal = (() => {
   let suggestions = [];
   let selectedIdx = new Set();
 
+  function populateRoleDropdown(type) {
+    const sel = elements.aiSuggestRole;
+    if (!sel) return;
+    const roles = type.roles || [];
+    sel.innerHTML = `<option value="">— 請選擇角色 —</option>` +
+      roles.map((r) => `<option value="${escapeHtml(r.code)}">${escapeHtml(r.code)} · ${escapeHtml(r.label)}</option>`).join("");
+  }
+
+  function syncGenerateEnabled() {
+    if (!elements.aiSuggestGenerate) return;
+    const hasRole = !!(elements.aiSuggestRole && elements.aiSuggestRole.value);
+    const hasTask = !!(elements.aiSuggestTask && elements.aiSuggestTask.value.trim());
+    elements.aiSuggestGenerate.disabled = !(hasRole && hasTask);
+  }
+
   function open(agentTypeId) {
     const type = AGENT_TYPES[agentTypeId];
     if (!type) {
@@ -883,20 +898,25 @@ const AISuggestModal = (() => {
     }
     const apiKey = (Store.get("gemini_api_key", "") || "").trim();
     if (!apiKey) {
-      showToast("請先在 batch view 的「⚙️ AI 設定」內填 Gemini API Key", { type: "error" });
+      showToast("請先到左下角「設定 → AI 助手」填 Gemini API Key", { type: "error" });
       return;
     }
     currentAgentId = agentTypeId;
     suggestions = [];
     selectedIdx = new Set();
     elements.aiSuggestAgentLabel.textContent = `Agent: ${type.label}`;
-    elements.aiSuggestInput.value = "";
+    populateRoleDropdown(type);
+    elements.aiSuggestRole.value = "";
+    elements.aiSuggestRoleDesc.textContent = "";
+    elements.aiSuggestTask.value = "";
+    elements.aiSuggestContext.value = "";
     elements.aiSuggestStatus.textContent = "";
     elements.aiSuggestResults.innerHTML = "";
     elements.aiSuggestApply.disabled = true;
+    elements.aiSuggestGenerate.disabled = true;
     elements.aiSuggestModal.hidden = false;
     elements.aiSuggestModal.removeAttribute("aria-hidden");
-    elements.aiSuggestInput.focus();
+    elements.aiSuggestRole.focus();
   }
 
   function close() {
@@ -906,12 +926,25 @@ const AISuggestModal = (() => {
 
   async function generate() {
     if (!currentAgentId) return;
-    const userInput = elements.aiSuggestInput.value.trim();
-    if (!userInput) {
-      elements.aiSuggestStatus.textContent = "請先填入任務 / 角色 / 背景";
+    const role = elements.aiSuggestRole.value;
+    const task = elements.aiSuggestTask.value.trim();
+    const context = elements.aiSuggestContext.value.trim();
+    if (!role || !task) {
+      elements.aiSuggestStatus.textContent = "請選擇角色並填入任務";
       return;
     }
     const type = AGENT_TYPES[currentAgentId];
+    const roleObj = (type.roles || []).find((r) => r.code === role);
+    const roleStr = roleObj
+      ? `[${role}] ${roleObj.label}（${roleObj.desc}）`
+      : `[${role}]`;
+    const userInput = [
+      `角色：${roleStr}`,
+      `任務：${task}`,
+      context ? `補充背景：${context}` : null,
+      "",
+      `請依此產生建議的 Redmine issue 清單。每筆 issue 的 subject 必須以 [${role}] 開頭。`,
+    ].filter((line) => line !== null).join("\n");
     const cfg = AgentSettings.get(currentAgentId);
     elements.aiSuggestGenerate.disabled = true;
     elements.aiSuggestStatus.textContent = "AI 生成中…";
@@ -932,7 +965,8 @@ const AISuggestModal = (() => {
       console.error("[AISuggest] generate failed:", err);
       elements.aiSuggestStatus.textContent = "生成失敗：" + (err.message || String(err));
     } finally {
-      elements.aiSuggestGenerate.disabled = false;
+      // 失敗或結束後仍依 role+task 條件啟用按鈕 (避免再點時被卡 disabled)
+      syncGenerateEnabled();
     }
   }
 
@@ -971,10 +1005,15 @@ const AISuggestModal = (() => {
 
   function applySelected() {
     if (!selectedIdx.size) return;
+    // Safety net: AI 偶爾忘記帶 [ROLE] 前綴，client 端強制 prepend
+    const role = elements.aiSuggestRole.value;
+    const prefix = role ? `[${role}]` : "";
     for (const idx of selectedIdx) {
       const it = suggestions[idx];
       if (!it) continue;
-      const row = IssueBatchEditor.makeRow(it.subject || "", null);
+      let subject = String(it.subject || "").trim();
+      if (prefix && !subject.startsWith(prefix)) subject = prefix + subject;
+      const row = IssueBatchEditor.makeRow(subject, null);
       if (Number.isFinite(Number(it.estimated_hours)) && Number(it.estimated_hours) > 0) {
         row.estimated_hours = String(Number(it.estimated_hours));
       }
@@ -1000,6 +1039,22 @@ const AISuggestModal = (() => {
     elements.aiSuggestModal.addEventListener("click", (e) => {
       if (e.target === elements.aiSuggestModal) close();
     });
+    // Role change: 顯示 desc + 同步 generate disabled
+    if (elements.aiSuggestRole) {
+      elements.aiSuggestRole.addEventListener("change", () => {
+        const role = elements.aiSuggestRole.value;
+        const type = currentAgentId ? AGENT_TYPES[currentAgentId] : null;
+        const roleObj = (type?.roles || []).find((r) => r.code === role);
+        elements.aiSuggestRoleDesc.textContent = roleObj
+          ? `${roleObj.label} — ${roleObj.desc}`
+          : "";
+        syncGenerateEnabled();
+      });
+    }
+    // Task input: 同步 generate disabled
+    if (elements.aiSuggestTask) {
+      elements.aiSuggestTask.addEventListener("input", syncGenerateEnabled);
+    }
   }
 
   return { open, close, init };
@@ -1234,7 +1289,10 @@ const elements = {
   aiSuggestModalClose: document.getElementById("ai-suggest-modal-close"),
   aiSuggestModalCancel: document.getElementById("ai-suggest-modal-cancel"),
   aiSuggestAgentLabel: document.getElementById("ai-suggest-agent-label"),
-  aiSuggestInput: document.getElementById("ai-suggest-input"),
+  aiSuggestRole: document.getElementById("ai-suggest-role"),
+  aiSuggestRoleDesc: document.getElementById("ai-suggest-role-desc"),
+  aiSuggestTask: document.getElementById("ai-suggest-task"),
+  aiSuggestContext: document.getElementById("ai-suggest-context"),
   aiSuggestGenerate: document.getElementById("ai-suggest-generate"),
   aiSuggestStatus: document.getElementById("ai-suggest-status"),
   aiSuggestResults: document.getElementById("ai-suggest-results"),

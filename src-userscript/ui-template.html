@@ -2179,12 +2179,23 @@
         </div>
         <div class="modal-body">
           <div class="muted" id="ai-suggest-agent-label">Agent: 批次建 issue Agent</div>
-          <label class="field-stack ai-suggest-input-wrap">
-            <span>任務 / 角色 / 背景</span>
-            <textarea id="ai-suggest-input" rows="6" placeholder="例如：我是後端工程師，本週要幫 ITG040 加入會員登入。請建 5-8 筆 issue 涵蓋 DB schema / API / 測試 / docs"></textarea>
+          <label class="field-stack">
+            <span>角色 <span style="color:#e53">*</span></span>
+            <select id="ai-suggest-role">
+              <option value="">— 請選擇角色 —</option>
+            </select>
+            <span class="muted" id="ai-suggest-role-desc"></span>
           </label>
-          <div class="ai-suggest-actions">
-            <button type="button" class="btn btn-secondary" id="ai-suggest-generate">生成建議</button>
+          <label class="field-stack" style="margin-top:12px;">
+            <span>任務 <span style="color:#e53">*</span></span>
+            <textarea id="ai-suggest-task" rows="3" placeholder="要做什麼？例如：建立會員登入流程"></textarea>
+          </label>
+          <label class="field-stack" style="margin-top:12px;">
+            <span>補充背景資訊（選填，協助 AI 拆 task）</span>
+            <textarea id="ai-suggest-context" rows="4" placeholder="例如：使用 OAuth2、要支援 Google + 公司 SSO、串現有 LDAP；前端用 Vue 3"></textarea>
+          </label>
+          <div class="ai-suggest-actions" style="margin-top:12px;">
+            <button type="button" class="btn btn-secondary" id="ai-suggest-generate" disabled>生成建議</button>
             <span class="muted" id="ai-suggest-status"></span>
           </div>
           <div id="ai-suggest-results" class="ai-suggest-results"></div>

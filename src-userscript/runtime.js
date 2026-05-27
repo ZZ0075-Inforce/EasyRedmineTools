@@ -320,10 +320,18 @@ const AGENT_TYPES = {
   "batch-issue": {
     targetView: "issue-batch",
     label: "批次建 issue Agent",
+    roles: [
+      { code: "PG", label: "Programmer", desc: "工程師（前端/後端開發、bug 修復、技術實作）" },
+      { code: "SD", label: "System Designer", desc: "系統設計師（系統流程、介面設計、模組規劃）" },
+      { code: "SA", label: "System Analyst", desc: "系統分析師（需求分析、規格文件、流程梳理）" },
+      { code: "PM", label: "Project Manager", desc: "專案經理（進度管理、會議協調、溝通對齊）" },
+      { code: "QC", label: "Quality Control", desc: "品質管控（測試計畫、bug 驗證、上線檢查）" },
+      { code: "BA", label: "Business Analyst", desc: "商業分析師（商業需求、流程梳理、流程文件）" },
+    ],
     defaultSysprompt:
-      "你是專案管理助手。根據 user 提供的角色與任務背景，建議要建立的 Redmine issue。\n" +
+      "你是專案管理助手。根據 user 提供的角色、任務、背景，建議要建立的 Redmine issue。\n" +
       "請只回 JSON，符合提供的 schema。\n" +
-      "每筆 issue 的 subject 簡潔具體（≤80 字），不重複，不要編號前綴。\n" +
+      "每筆 issue 的 subject 必須以 user 指定的角色縮寫前綴開頭（例：[PG]開發前端 UI），≤80 字、簡潔具體、不重複。\n" +
       "如果能合理推估，再附 estimated_hours（小時，正數）/ start_date / due_date（YYYY-MM-DD）。\n" +
       "rationale 用一句話說明為何建議建這筆 issue（給 user 看的，繁體中文）。",
     defaultModel: "gemma-4-26b-it",
