@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605272143
+// @version      1.0.202605272147
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -229,6 +229,39 @@ const APP_HTML = `<div class="pj-app-shell">
                 <select id="batch-tracker-select"></select>
               </label>
             </div>
+          </section>
+
+          <section class="pj-batch-section">
+            <details class="ai-settings-section" id="ai-settings-section">
+              <summary>⚙️ AI 設定（API Key + Sysprompt + 模型）</summary>
+              <div class="ai-settings-body">
+                <label class="pj-field-stack">
+                  <span>Gemini API Key</span>
+                  <input type="password" id="ai-api-key-input" placeholder="貼上 Google AI Studio 的 API Key" autocomplete="off">
+                </label>
+                <label class="pj-field-stack">
+                  <span>Agent</span>
+                  <select id="ai-agent-type-select"></select>
+                </label>
+                <label class="pj-field-stack">
+                  <span>模型</span>
+                  <select id="ai-model-select"></select>
+                </label>
+                <label class="pj-field-stack">
+                  <span>自訂模型 ID（覆寫上方選擇，可留空）</span>
+                  <input type="text" id="ai-model-custom-input" placeholder="例如 gemini-2.5-pro 或新發布的 model id">
+                </label>
+                <label class="pj-field-stack">
+                  <span>Sysprompt</span>
+                  <textarea id="ai-sysprompt-input" rows="8"></textarea>
+                </label>
+                <div class="ai-settings-actions">
+                  <button type="button" class="pj-action-button" id="ai-settings-save">儲存</button>
+                  <button type="button" class="pj-ghost-button" id="ai-settings-reset">重設為預設</button>
+                  <span class="muted" id="ai-settings-status"></span>
+                </div>
+              </div>
+            </details>
           </section>
 
           <section class="pj-batch-section">
@@ -2356,6 +2389,58 @@ const CurrentUserManager = (() => {
   return { get, reset };
 })();
 
+/* ===== GeminiClient：Google Gemini API generateContent 包裝 ================
+ * 公開 generate(modelId, sysprompt, userInput, responseSchema)，內部:
+ * 1. 從 GM 抓 gemini_api_key
+ * 2. POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent
+ * 3. systemInstruction + contents(user) + generationConfig.responseSchema 強制 JSON
+ * 4. 從 candidates[0].content.parts[0].text 抽 JSON 字串並 parse
+ * 失敗條件: 沒 API key / HTTP 非 2xx / parse 失敗 都 throw Error 帶說明。
+ */
+const GeminiClient = (() => {
+  const ENDPOINT_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+
+  async function generate(modelId, sysprompt, userInput, responseSchema) {
+    const apiKey = (Store.get("gemini_api_key", "") || "").trim();
+    if (!apiKey) throw new Error("尚未設定 Gemini API Key");
+    if (!modelId) throw new Error("尚未指定模型");
+    const url = `${ENDPOINT_BASE}/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const body = {
+      contents: [{ role: "user", parts: [{ text: userInput }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
+      },
+    };
+    if (sysprompt && sysprompt.trim()) {
+      body.systemInstruction = { parts: [{ text: sysprompt }] };
+    }
+    if (responseSchema) {
+      body.generationConfig.responseSchema = responseSchema;
+    }
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Gemini ${res.status}：${text.slice(0, 240)}`);
+    }
+    const data = await res.json();
+    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    if (!rawText) throw new Error("Gemini 回應內容為空");
+    try {
+      return JSON.parse(rawText);
+    } catch (_) {
+      throw new Error("Gemini 回應不是 JSON：" + rawText.slice(0, 160));
+    }
+  }
+
+  return { generate };
+})();
+
+window.__worklog_GeminiClient = GeminiClient;
+
 /* ===== Random token utility（preview session 與 issue-templates / saved-queries 共用） === */
 function randomToken() {
   const b = crypto.getRandomValues(new Uint8Array(18));
@@ -3397,8 +3482,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605272143";
-const APP_BUILD_TIME = "2026-05-27 21:43";
+const APP_VERSION = "1.0.202605272147";
+const APP_BUILD_TIME = "2026-05-27 21:47";
 
 const state = {
   localToday: localDateString(new Date()),
@@ -4446,6 +4531,14 @@ const elements = {
   inlineDefaultPhraseStatus: document.getElementById("inline-default-phrase-status"),
   inlineToolbarEnabledToggle: document.getElementById("inline-toolbar-enabled-toggle"),
   inlineToolbarEnabledStatus: document.getElementById("inline-toolbar-enabled-status"),
+  aiApiKeyInput: document.getElementById("ai-api-key-input"),
+  aiAgentTypeSelect: document.getElementById("ai-agent-type-select"),
+  aiModelSelect: document.getElementById("ai-model-select"),
+  aiModelCustomInput: document.getElementById("ai-model-custom-input"),
+  aiSyspromptInput: document.getElementById("ai-sysprompt-input"),
+  aiSettingsSave: document.getElementById("ai-settings-save"),
+  aiSettingsReset: document.getElementById("ai-settings-reset"),
+  aiSettingsStatus: document.getElementById("ai-settings-status"),
 };
 
 /* ===== Toast：短暫操作反饋 (success / error / info)，自動消失 ============== */
@@ -5736,6 +5829,95 @@ const InlineToolsConfig = (() => {
   return { render };
 })();
 
+/* ===== AGENT_TYPES：AI Agent registry (開發者預定義) ======================
+ * 每個 agent 綁定一個 view 用途。Hard-code:
+ * - defaultSysprompt: user 第一次用的 sysprompt（user 可改、改完存 GM）
+ * - defaultModel: 預設模型
+ * - outputSchema: Gemini responseSchema 強制 JSON 結構
+ * - parseResponse: 從 Gemini 回的 data 抽出可用的 row array
+ * User 在 AI 設定區只改 sysprompt + model；schema + parser 跟程式邏輯
+ * 緊耦合，user 不能改。
+ */
+const AGENT_TYPES = {
+  "batch-issue": {
+    label: "批次建 issue Agent",
+    defaultSysprompt:
+      "你是專案管理助手。根據 user 提供的角色與任務背景，建議要建立的 Redmine issue。\n" +
+      "請只回 JSON，符合提供的 schema。\n" +
+      "每筆 issue 的 subject 簡潔具體（≤80 字），不重複，不要編號前綴。\n" +
+      "如果能合理推估，再附 estimated_hours（小時，正數）/ start_date / due_date（YYYY-MM-DD）。\n" +
+      "rationale 用一句話說明為何建議建這筆 issue（給 user 看的，繁體中文）。",
+    defaultModel: "gemma-4-26b-it",
+    outputSchema: {
+      type: "object",
+      properties: {
+        issues: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              subject: { type: "string" },
+              estimated_hours: { type: "number" },
+              start_date: { type: "string" },
+              due_date: { type: "string" },
+              rationale: { type: "string" },
+            },
+            required: ["subject"],
+          },
+        },
+      },
+      required: ["issues"],
+    },
+    parseResponse: (data) => (data && Array.isArray(data.issues) ? data.issues : [])
+      .filter((it) => it && typeof it.subject === "string" && it.subject.trim()),
+  },
+  // 未來: "schedule": {...}, "worklog": {...}
+};
+
+const AGENT_MODEL_OPTIONS = [
+  "gemma-4-26b-it",
+  "gemma-4-31b-it",
+  "gemma-3-27b-it",
+  "gemini-2.5-flash",
+];
+
+/* ===== AgentSettings：每個 agent 的 sysprompt + model 持久化 ===============
+ * GM key: ai_agent_settings = { [agentTypeId]: { sysprompt, model } }
+ * 沒設定的 agent 用 AGENT_TYPES[id].default*。
+ */
+const AgentSettings = (() => {
+  const KEY = "ai_agent_settings";
+
+  function loadAll() {
+    return Store.get(KEY, {}) || {};
+  }
+
+  function get(agentTypeId) {
+    const type = AGENT_TYPES[agentTypeId];
+    if (!type) throw new Error(`unknown agent type: ${agentTypeId}`);
+    const saved = loadAll()[agentTypeId] || {};
+    return {
+      sysprompt: typeof saved.sysprompt === "string" ? saved.sysprompt : type.defaultSysprompt,
+      model: typeof saved.model === "string" && saved.model ? saved.model : type.defaultModel,
+    };
+  }
+
+  function save(agentTypeId, { sysprompt, model }) {
+    if (!AGENT_TYPES[agentTypeId]) throw new Error(`unknown agent type: ${agentTypeId}`);
+    const all = loadAll();
+    all[agentTypeId] = { sysprompt: sysprompt || "", model: model || "" };
+    Store.set(KEY, all);
+  }
+
+  function reset(agentTypeId) {
+    const all = loadAll();
+    delete all[agentTypeId];
+    Store.set(KEY, all);
+  }
+
+  return { get, save, reset };
+})();
+
 /* ===== IssueBatchEditor：批次建 issue view (templates + rows + submit) =====
  * 收: 14 個 view fn + module-level row uid counter + 9 個主 scope handler
  * + toggleIssueDefault (跨 view 給 worklog 端 phrase menu 用)。
@@ -5744,7 +5926,75 @@ const InlineToolsConfig = (() => {
 const IssueBatchEditor = (() => {
   let rowUidCounter = 1;
 
+  let aiSettingsBound = false;
+
   function nextRowUid() { return "br-" + (rowUidCounter++); }
+
+  function renderAISettings() {
+    if (!elements.aiAgentTypeSelect) return;
+
+    // Agent type dropdown（首次 populate）
+    if (!elements.aiAgentTypeSelect.options.length) {
+      elements.aiAgentTypeSelect.innerHTML = Object.entries(AGENT_TYPES)
+        .map(([id, t]) => `<option value="${escapeHtml(id)}">${escapeHtml(t.label)}</option>`)
+        .join("");
+    }
+
+    // Model dropdown（首次 populate）
+    if (!elements.aiModelSelect.options.length) {
+      elements.aiModelSelect.innerHTML = AGENT_MODEL_OPTIONS
+        .map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`)
+        .join("");
+    }
+
+    // API key
+    elements.aiApiKeyInput.value = Store.get("gemini_api_key", "") || "";
+
+    // 當前 agent 的 sysprompt + model
+    const agentId = elements.aiAgentTypeSelect.value || Object.keys(AGENT_TYPES)[0];
+    if (!elements.aiAgentTypeSelect.value) elements.aiAgentTypeSelect.value = agentId;
+    const cfg = AgentSettings.get(agentId);
+    elements.aiSyspromptInput.value = cfg.sysprompt;
+    if (AGENT_MODEL_OPTIONS.includes(cfg.model)) {
+      elements.aiModelSelect.value = cfg.model;
+      elements.aiModelCustomInput.value = "";
+    } else {
+      elements.aiModelSelect.value = AGENT_MODEL_OPTIONS[0];
+      elements.aiModelCustomInput.value = cfg.model;
+    }
+
+    if (!aiSettingsBound) {
+      aiSettingsBound = true;
+      bindAISettings();
+    }
+  }
+
+  function bindAISettings() {
+    elements.aiAgentTypeSelect.addEventListener("change", renderAISettings);
+
+    elements.aiSettingsSave.addEventListener("click", () => {
+      const agentId = elements.aiAgentTypeSelect.value;
+      Store.set("gemini_api_key", elements.aiApiKeyInput.value.trim());
+      const custom = elements.aiModelCustomInput.value.trim();
+      const model = custom || elements.aiModelSelect.value;
+      AgentSettings.save(agentId, {
+        sysprompt: elements.aiSyspromptInput.value,
+        model,
+      });
+      if (elements.aiSettingsStatus) {
+        elements.aiSettingsStatus.textContent = `已儲存（model: ${model}）`;
+      }
+    });
+
+    elements.aiSettingsReset.addEventListener("click", () => {
+      const agentId = elements.aiAgentTypeSelect.value;
+      AgentSettings.reset(agentId);
+      renderAISettings();
+      if (elements.aiSettingsStatus) {
+        elements.aiSettingsStatus.textContent = "已重設為預設";
+      }
+    });
+  }
 
   function makeRow(subject = "", templateId = null) {
     return {
@@ -5843,6 +6093,7 @@ const IssueBatchEditor = (() => {
 
   function render() {
     if (!elements.batchProjectInput) return;
+    renderAISettings();
     renderProjectsDatalist();
     renderTrackerSelect();
     renderTemplatesPicker();

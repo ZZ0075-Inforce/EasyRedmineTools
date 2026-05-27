@@ -1048,6 +1048,14 @@ const elements = {
   inlineDefaultPhraseStatus: document.getElementById("inline-default-phrase-status"),
   inlineToolbarEnabledToggle: document.getElementById("inline-toolbar-enabled-toggle"),
   inlineToolbarEnabledStatus: document.getElementById("inline-toolbar-enabled-status"),
+  aiApiKeyInput: document.getElementById("ai-api-key-input"),
+  aiAgentTypeSelect: document.getElementById("ai-agent-type-select"),
+  aiModelSelect: document.getElementById("ai-model-select"),
+  aiModelCustomInput: document.getElementById("ai-model-custom-input"),
+  aiSyspromptInput: document.getElementById("ai-sysprompt-input"),
+  aiSettingsSave: document.getElementById("ai-settings-save"),
+  aiSettingsReset: document.getElementById("ai-settings-reset"),
+  aiSettingsStatus: document.getElementById("ai-settings-status"),
 };
 
 /* ===== Toast：短暫操作反饋 (success / error / info)，自動消失 ============== */
@@ -2349,6 +2357,95 @@ const InlineToolsConfig = (() => {
   return { render };
 })();
 
+/* ===== AGENT_TYPES：AI Agent registry (開發者預定義) ======================
+ * 每個 agent 綁定一個 view 用途。Hard-code:
+ * - defaultSysprompt: user 第一次用的 sysprompt（user 可改、改完存 GM）
+ * - defaultModel: 預設模型
+ * - outputSchema: Gemini responseSchema 強制 JSON 結構
+ * - parseResponse: 從 Gemini 回的 data 抽出可用的 row array
+ * User 在 AI 設定區只改 sysprompt + model；schema + parser 跟程式邏輯
+ * 緊耦合，user 不能改。
+ */
+const AGENT_TYPES = {
+  "batch-issue": {
+    label: "批次建 issue Agent",
+    defaultSysprompt:
+      "你是專案管理助手。根據 user 提供的角色與任務背景，建議要建立的 Redmine issue。\n" +
+      "請只回 JSON，符合提供的 schema。\n" +
+      "每筆 issue 的 subject 簡潔具體（≤80 字），不重複，不要編號前綴。\n" +
+      "如果能合理推估，再附 estimated_hours（小時，正數）/ start_date / due_date（YYYY-MM-DD）。\n" +
+      "rationale 用一句話說明為何建議建這筆 issue（給 user 看的，繁體中文）。",
+    defaultModel: "gemma-4-26b-it",
+    outputSchema: {
+      type: "object",
+      properties: {
+        issues: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              subject: { type: "string" },
+              estimated_hours: { type: "number" },
+              start_date: { type: "string" },
+              due_date: { type: "string" },
+              rationale: { type: "string" },
+            },
+            required: ["subject"],
+          },
+        },
+      },
+      required: ["issues"],
+    },
+    parseResponse: (data) => (data && Array.isArray(data.issues) ? data.issues : [])
+      .filter((it) => it && typeof it.subject === "string" && it.subject.trim()),
+  },
+  // 未來: "schedule": {...}, "worklog": {...}
+};
+
+const AGENT_MODEL_OPTIONS = [
+  "gemma-4-26b-it",
+  "gemma-4-31b-it",
+  "gemma-3-27b-it",
+  "gemini-2.5-flash",
+];
+
+/* ===== AgentSettings：每個 agent 的 sysprompt + model 持久化 ===============
+ * GM key: ai_agent_settings = { [agentTypeId]: { sysprompt, model } }
+ * 沒設定的 agent 用 AGENT_TYPES[id].default*。
+ */
+const AgentSettings = (() => {
+  const KEY = "ai_agent_settings";
+
+  function loadAll() {
+    return Store.get(KEY, {}) || {};
+  }
+
+  function get(agentTypeId) {
+    const type = AGENT_TYPES[agentTypeId];
+    if (!type) throw new Error(`unknown agent type: ${agentTypeId}`);
+    const saved = loadAll()[agentTypeId] || {};
+    return {
+      sysprompt: typeof saved.sysprompt === "string" ? saved.sysprompt : type.defaultSysprompt,
+      model: typeof saved.model === "string" && saved.model ? saved.model : type.defaultModel,
+    };
+  }
+
+  function save(agentTypeId, { sysprompt, model }) {
+    if (!AGENT_TYPES[agentTypeId]) throw new Error(`unknown agent type: ${agentTypeId}`);
+    const all = loadAll();
+    all[agentTypeId] = { sysprompt: sysprompt || "", model: model || "" };
+    Store.set(KEY, all);
+  }
+
+  function reset(agentTypeId) {
+    const all = loadAll();
+    delete all[agentTypeId];
+    Store.set(KEY, all);
+  }
+
+  return { get, save, reset };
+})();
+
 /* ===== IssueBatchEditor：批次建 issue view (templates + rows + submit) =====
  * 收: 14 個 view fn + module-level row uid counter + 9 個主 scope handler
  * + toggleIssueDefault (跨 view 給 worklog 端 phrase menu 用)。
@@ -2357,7 +2454,75 @@ const InlineToolsConfig = (() => {
 const IssueBatchEditor = (() => {
   let rowUidCounter = 1;
 
+  let aiSettingsBound = false;
+
   function nextRowUid() { return "br-" + (rowUidCounter++); }
+
+  function renderAISettings() {
+    if (!elements.aiAgentTypeSelect) return;
+
+    // Agent type dropdown（首次 populate）
+    if (!elements.aiAgentTypeSelect.options.length) {
+      elements.aiAgentTypeSelect.innerHTML = Object.entries(AGENT_TYPES)
+        .map(([id, t]) => `<option value="${escapeHtml(id)}">${escapeHtml(t.label)}</option>`)
+        .join("");
+    }
+
+    // Model dropdown（首次 populate）
+    if (!elements.aiModelSelect.options.length) {
+      elements.aiModelSelect.innerHTML = AGENT_MODEL_OPTIONS
+        .map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`)
+        .join("");
+    }
+
+    // API key
+    elements.aiApiKeyInput.value = Store.get("gemini_api_key", "") || "";
+
+    // 當前 agent 的 sysprompt + model
+    const agentId = elements.aiAgentTypeSelect.value || Object.keys(AGENT_TYPES)[0];
+    if (!elements.aiAgentTypeSelect.value) elements.aiAgentTypeSelect.value = agentId;
+    const cfg = AgentSettings.get(agentId);
+    elements.aiSyspromptInput.value = cfg.sysprompt;
+    if (AGENT_MODEL_OPTIONS.includes(cfg.model)) {
+      elements.aiModelSelect.value = cfg.model;
+      elements.aiModelCustomInput.value = "";
+    } else {
+      elements.aiModelSelect.value = AGENT_MODEL_OPTIONS[0];
+      elements.aiModelCustomInput.value = cfg.model;
+    }
+
+    if (!aiSettingsBound) {
+      aiSettingsBound = true;
+      bindAISettings();
+    }
+  }
+
+  function bindAISettings() {
+    elements.aiAgentTypeSelect.addEventListener("change", renderAISettings);
+
+    elements.aiSettingsSave.addEventListener("click", () => {
+      const agentId = elements.aiAgentTypeSelect.value;
+      Store.set("gemini_api_key", elements.aiApiKeyInput.value.trim());
+      const custom = elements.aiModelCustomInput.value.trim();
+      const model = custom || elements.aiModelSelect.value;
+      AgentSettings.save(agentId, {
+        sysprompt: elements.aiSyspromptInput.value,
+        model,
+      });
+      if (elements.aiSettingsStatus) {
+        elements.aiSettingsStatus.textContent = `已儲存（model: ${model}）`;
+      }
+    });
+
+    elements.aiSettingsReset.addEventListener("click", () => {
+      const agentId = elements.aiAgentTypeSelect.value;
+      AgentSettings.reset(agentId);
+      renderAISettings();
+      if (elements.aiSettingsStatus) {
+        elements.aiSettingsStatus.textContent = "已重設為預設";
+      }
+    });
+  }
 
   function makeRow(subject = "", templateId = null) {
     return {
@@ -2456,6 +2621,7 @@ const IssueBatchEditor = (() => {
 
   function render() {
     if (!elements.batchProjectInput) return;
+    renderAISettings();
     renderProjectsDatalist();
     renderTrackerSelect();
     renderTemplatesPicker();

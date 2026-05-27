@@ -1962,6 +1962,39 @@
           </section>
 
           <section class="batch-section">
+            <details class="ai-settings-section" id="ai-settings-section">
+              <summary>⚙️ AI 設定（API Key + Sysprompt + 模型）</summary>
+              <div class="ai-settings-body">
+                <label class="field-stack">
+                  <span>Gemini API Key</span>
+                  <input type="password" id="ai-api-key-input" placeholder="貼上 Google AI Studio 的 API Key" autocomplete="off">
+                </label>
+                <label class="field-stack">
+                  <span>Agent</span>
+                  <select id="ai-agent-type-select"></select>
+                </label>
+                <label class="field-stack">
+                  <span>模型</span>
+                  <select id="ai-model-select"></select>
+                </label>
+                <label class="field-stack">
+                  <span>自訂模型 ID（覆寫上方選擇，可留空）</span>
+                  <input type="text" id="ai-model-custom-input" placeholder="例如 gemini-2.5-pro 或新發布的 model id">
+                </label>
+                <label class="field-stack">
+                  <span>Sysprompt</span>
+                  <textarea id="ai-sysprompt-input" rows="8"></textarea>
+                </label>
+                <div class="ai-settings-actions">
+                  <button type="button" class="action-button" id="ai-settings-save">儲存</button>
+                  <button type="button" class="ghost-button" id="ai-settings-reset">重設為預設</button>
+                  <span class="muted" id="ai-settings-status"></span>
+                </div>
+              </div>
+            </details>
+          </section>
+
+          <section class="batch-section">
             <div class="batch-section-header">
               <h3 class="section-subtitle">Issue 模板</h3>
               <span class="muted">勾選即加入下方表格；取消勾選即移除；點 ✎ 編輯、🗑 刪除</span>

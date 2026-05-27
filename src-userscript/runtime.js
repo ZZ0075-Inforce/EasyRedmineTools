@@ -252,6 +252,58 @@ const CurrentUserManager = (() => {
   return { get, reset };
 })();
 
+/* ===== GeminiClient：Google Gemini API generateContent 包裝 ================
+ * 公開 generate(modelId, sysprompt, userInput, responseSchema)，內部:
+ * 1. 從 GM 抓 gemini_api_key
+ * 2. POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent
+ * 3. systemInstruction + contents(user) + generationConfig.responseSchema 強制 JSON
+ * 4. 從 candidates[0].content.parts[0].text 抽 JSON 字串並 parse
+ * 失敗條件: 沒 API key / HTTP 非 2xx / parse 失敗 都 throw Error 帶說明。
+ */
+const GeminiClient = (() => {
+  const ENDPOINT_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+
+  async function generate(modelId, sysprompt, userInput, responseSchema) {
+    const apiKey = (Store.get("gemini_api_key", "") || "").trim();
+    if (!apiKey) throw new Error("尚未設定 Gemini API Key");
+    if (!modelId) throw new Error("尚未指定模型");
+    const url = `${ENDPOINT_BASE}/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const body = {
+      contents: [{ role: "user", parts: [{ text: userInput }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
+      },
+    };
+    if (sysprompt && sysprompt.trim()) {
+      body.systemInstruction = { parts: [{ text: sysprompt }] };
+    }
+    if (responseSchema) {
+      body.generationConfig.responseSchema = responseSchema;
+    }
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Gemini ${res.status}：${text.slice(0, 240)}`);
+    }
+    const data = await res.json();
+    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    if (!rawText) throw new Error("Gemini 回應內容為空");
+    try {
+      return JSON.parse(rawText);
+    } catch (_) {
+      throw new Error("Gemini 回應不是 JSON：" + rawText.slice(0, 160));
+    }
+  }
+
+  return { generate };
+})();
+
+window.__worklog_GeminiClient = GeminiClient;
+
 /* ===== Random token utility（preview session 與 issue-templates / saved-queries 共用） === */
 function randomToken() {
   const b = crypto.getRandomValues(new Uint8Array(18));
