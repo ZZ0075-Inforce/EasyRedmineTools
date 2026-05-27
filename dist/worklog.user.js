@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605271514
+// @version      1.0.202605271626
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -1731,7 +1731,7 @@ const TimeEntryHandlers = {
 
     const warnings = [];
     let uid;
-    try { uid = await getCurrentUserId(); } catch { uid = null; }
+    try { uid = await CurrentUserManager.get(); } catch { uid = null; }
     for (const e of entries) {
       if (Object.keys(e.errors).length) continue;
       if (!uid) { warnings.push("無法確認目前使用者，跳過 duplicate 偵測"); continue; }
@@ -1821,9 +1821,9 @@ const IssueHandlers = {
       } else if (source === "visited") {
         // 從 GM 儲存讀「近 7 天 /issues/{id} 訪問過」的清單
         // D 方案: cache > 1 hr stale 時 batch refresh subjects (回頭更新被異動的標題)
-        const cutoff = dateStrDaysAgo(getVisitRetentionDays());
-        let list = isVisitedSubjectsStale()
-          ? await refreshVisitedSubjects()
+        const cutoff = dateStrDaysAgo(VisitedIssuesRegistry.getRetentionDays());
+        let list = VisitedIssuesRegistry.isStale()
+          ? await VisitedIssuesRegistry.refresh()
           : (Store.get("visited_issues", []) || []);
         list = list.filter(
           (x) => x && (x.last_visited_at || "") >= cutoff
@@ -1871,7 +1871,7 @@ const IssueHandlers = {
 
     // 抓本人 ID 作為預設指派人（部分 tracker 必填 assignee → 422）
     let assigneeId = null;
-    try { assigneeId = await getCurrentUserId(); } catch {}
+    try { assigneeId = await CurrentUserManager.get(); } catch {}
 
     const results = [];
     for (const row of rows) {
@@ -2217,124 +2217,145 @@ function toIssueSummary(raw) {
   };
 }
 
-/* ===== 訪問紀錄：當前頁是 /issues/{id} 就把這筆 issue 記到 GM 儲存
-        保留 N 天（使用者可在設定 → 填寫工時調整，預設 7 天），移除過期。  === */
-function getVisitRetentionDays() {
-  const raw = Number(Store.get("visit_retention_days", 7));
-  if (!Number.isFinite(raw) || raw < 1) return 7;
-  return Math.min(raw, 365);
-}
-
+/* ===== 純日期 util（VisitedIssuesRegistry 與 handler module 都會用） ====== */
 function todayStr() { return new Date().toISOString().slice(0, 10); }
 function dateStrDaysAgo(n) {
   return new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
 }
 
-async function recordIssueVisit() {
-  const m = location.pathname.match(/^\/issues\/(\d+)\/?$/);
-  if (!m) return;
-  const id = Number(m[1]);
-  const today = todayStr();
-  const cutoff = dateStrDaysAgo(getVisitRetentionDays());
+/* ===== VisitedIssuesRegistry：訪問紀錄 + 1 小時 subject refresh =============
+ * 當前頁是 /issues/{id} 就把這筆 issue 記到 GM 儲存，保留 N 天（使用者可在
+ * 設定 → 填寫工時調整，預設 7 天），移除過期。subject refresh 用 1 小時
+ * cache 回頭更新被異動的標題。
+ */
+const VisitedIssuesRegistry = (() => {
+  const REFRESH_INTERVAL_MS = 60 * 60 * 1000;  // 1 hour
 
-  let list = (Store.get("visited_issues", []) || []).filter(
-    (x) => x && (x.last_visited_at || "") >= cutoff
-  );
-
-  // 已有今天的紀錄就不重抓（節省 API 呼叫）
-  const existing = list.find((x) => x.issue_id === id && x.last_visited_at === today);
-  if (existing && existing.subject) {
-    Store.set("visited_issues", list);
-    return;
+  function getRetentionDays() {
+    const raw = Number(Store.get("visit_retention_days", 7));
+    if (!Number.isFinite(raw) || raw < 1) return 7;
+    return Math.min(raw, 365);
   }
 
-  // 嘗試抓完整資料；失敗就存最小資訊
-  let entry;
-  try {
-    const data = await redmineFetch(`/issues/${id}.json`);
-    if (data && data.issue) {
-      entry = { ...toIssueSummary(data.issue), last_visited_at: today };
+  function isStale() {
+    const last = Store.get("visited_subjects_refreshed_at", "");
+    if (!last) return true;  // 從未 refresh 過 (含升版初次)
+    const lastMs = new Date(last).getTime();
+    if (!Number.isFinite(lastMs)) return true;
+    return (Date.now() - lastMs) >= REFRESH_INTERVAL_MS;
+  }
+
+  async function recordVisit() {
+    const m = location.pathname.match(/^\/issues\/(\d+)\/?$/);
+    if (!m) return;
+    const id = Number(m[1]);
+    const today = todayStr();
+    const cutoff = dateStrDaysAgo(getRetentionDays());
+
+    let list = (Store.get("visited_issues", []) || []).filter(
+      (x) => x && (x.last_visited_at || "") >= cutoff
+    );
+
+    // 已有今天的紀錄就不重抓（節省 API 呼叫）
+    const existing = list.find((x) => x.issue_id === id && x.last_visited_at === today);
+    if (existing && existing.subject) {
+      Store.set("visited_issues", list);
+      return;
     }
-  } catch {}
-  if (!entry) {
-    entry = {
-      issue_id: id,
-      subject: `Issue #${id}`,
-      issue_url: location.origin + "/issues/" + id,
-      last_visited_at: today,
-    };
-  }
-  list = list.filter((x) => x.issue_id !== id);
-  list.unshift(entry);
-  Store.set("visited_issues", list);
-}
 
-window.__worklog_recordVisit = recordIssueVisit;
-
-/* ===== visited subjects 1 小時 cache refresh：回頭更新被異動的 subject ===== */
-const VISITED_REFRESH_INTERVAL_MS = 60 * 60 * 1000;  // 1 hour
-
-function isVisitedSubjectsStale() {
-  const last = Store.get("visited_subjects_refreshed_at", "");
-  if (!last) return true;  // 從未 refresh 過 (含升版初次)
-  const lastMs = new Date(last).getTime();
-  if (!Number.isFinite(lastMs)) return true;
-  return (Date.now() - lastMs) >= VISITED_REFRESH_INTERVAL_MS;
-}
-
-async function refreshVisitedSubjects() {
-  const list = Store.get("visited_issues", []) || [];
-  if (!list.length) {
-    Store.set("visited_subjects_refreshed_at", new Date().toISOString());
-    return [];
-  }
-  const ids = list.map((x) => x.issue_id).filter((id) => Number.isFinite(id));
-  if (!ids.length) return list;
-
-  try {
-    // status_id=* 含關閉的 issue (避免 default open filter 漏掉 user 看過再被關的)
-    const path = `/issues.json?issue_id=${ids.join(",")}&status_id=*&limit=100`;
-    const data = await redmineFetch(path);
-    const fresh = (data?.issues || []).map(toIssueSummary);
-    const freshById = new Map(fresh.map((it) => [it.issue_id, it]));
-
-    // Merge: 保留 last_visited_at; 用 fresh 蓋掉其他 fields
-    // 若 issue 不在 batch 回應 (可能已刪/權限關閉) 保留舊資料
-    const updated = list.map((entry) => {
-      const f = freshById.get(entry.issue_id);
-      if (!f) return entry;
-      return { ...f, last_visited_at: entry.last_visited_at };
-    });
-
-    Store.set("visited_issues", updated);
-    Store.set("visited_subjects_refreshed_at", new Date().toISOString());
-    return updated;
-  } catch (err) {
-    // Refresh 失敗 → 用既有 cached, 不更新時間戳 (下次仍會嘗試 refresh)
-    return list;
-  }
-}
-
-/* ===== 目前使用者 id：避免依賴 Redmine "me" keyword（不同版本行為不一） ===== */
-let __currentUserId = null;
-let __currentUserPromise = null;
-async function getCurrentUserId() {
-  if (__currentUserId !== null) return __currentUserId;
-  if (__currentUserPromise) return __currentUserPromise;
-  __currentUserPromise = (async () => {
+    // 嘗試抓完整資料；失敗就存最小資訊
+    let entry;
     try {
-      const data = await redmineFetch("/users/current.json");
-      __currentUserId = data.user?.id ?? null;
-      if (!__currentUserId) {
-        throw new Error("/users/current.json 未回傳 user.id（可能尚未登入或 session 已過期）");
+      const data = await redmineFetch(`/issues/${id}.json`);
+      if (data && data.issue) {
+        entry = { ...toIssueSummary(data.issue), last_visited_at: today };
       }
-      return __currentUserId;
-    } finally {
-      __currentUserPromise = null;
+    } catch {}
+    if (!entry) {
+      entry = {
+        issue_id: id,
+        subject: `Issue #${id}`,
+        issue_url: location.origin + "/issues/" + id,
+        last_visited_at: today,
+      };
     }
-  })();
-  return __currentUserPromise;
-}
+    list = list.filter((x) => x.issue_id !== id);
+    list.unshift(entry);
+    Store.set("visited_issues", list);
+  }
+
+  async function refresh() {
+    const list = Store.get("visited_issues", []) || [];
+    if (!list.length) {
+      Store.set("visited_subjects_refreshed_at", new Date().toISOString());
+      return [];
+    }
+    const ids = list.map((x) => x.issue_id).filter((id) => Number.isFinite(id));
+    if (!ids.length) return list;
+
+    try {
+      // status_id=* 含關閉的 issue (避免 default open filter 漏掉 user 看過再被關的)
+      const path = `/issues.json?issue_id=${ids.join(",")}&status_id=*&limit=100`;
+      const data = await redmineFetch(path);
+      const fresh = (data?.issues || []).map(toIssueSummary);
+      const freshById = new Map(fresh.map((it) => [it.issue_id, it]));
+
+      // Merge: 保留 last_visited_at; 用 fresh 蓋掉其他 fields
+      // 若 issue 不在 batch 回應 (可能已刪/權限關閉) 保留舊資料
+      const updated = list.map((entry) => {
+        const f = freshById.get(entry.issue_id);
+        if (!f) return entry;
+        return { ...f, last_visited_at: entry.last_visited_at };
+      });
+
+      Store.set("visited_issues", updated);
+      Store.set("visited_subjects_refreshed_at", new Date().toISOString());
+      return updated;
+    } catch (err) {
+      // Refresh 失敗 → 用既有 cached, 不更新時間戳 (下次仍會嘗試 refresh)
+      return list;
+    }
+  }
+
+  return { recordVisit, refresh, isStale, getRetentionDays };
+})();
+
+window.__worklog_recordVisit = VisitedIssuesRegistry.recordVisit;
+
+/* ===== CurrentUserManager：目前使用者 id 的 memoization ====================
+ * 避免依賴 Redmine "me" keyword（不同版本行為不一）。get() 第一次呼叫 fetch
+ * /users/current.json，後續直接回 cached。reset() 預備將來 session 失效時
+ * 強制 re-fetch（目前未掛 401 重 fetch hook，需要時再加）。
+ */
+const CurrentUserManager = (() => {
+  let userId = null;
+  let promise = null;
+
+  async function get() {
+    if (userId !== null) return userId;
+    if (promise) return promise;
+    promise = (async () => {
+      try {
+        const data = await redmineFetch("/users/current.json");
+        userId = data.user?.id ?? null;
+        if (!userId) {
+          throw new Error("/users/current.json 未回傳 user.id（可能尚未登入或 session 已過期）");
+        }
+        return userId;
+      } finally {
+        promise = null;
+      }
+    })();
+    return promise;
+  }
+
+  function reset() {
+    userId = null;
+    promise = null;
+  }
+
+  return { get, reset };
+})();
 
 /* ===== Random token utility（preview session 與 issue-templates / saved-queries 共用） === */
 function randomToken() {
@@ -3377,8 +3398,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605271514";
-const APP_BUILD_TIME = "2026-05-27 15:14";
+const APP_VERSION = "1.0.202605271626";
+const APP_BUILD_TIME = "2026-05-27 16:26";
 
 const state = {
   localToday: localDateString(new Date()),

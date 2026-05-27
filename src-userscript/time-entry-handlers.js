@@ -74,7 +74,7 @@ const TimeEntryHandlers = {
 
     const warnings = [];
     let uid;
-    try { uid = await getCurrentUserId(); } catch { uid = null; }
+    try { uid = await CurrentUserManager.get(); } catch { uid = null; }
     for (const e of entries) {
       if (Object.keys(e.errors).length) continue;
       if (!uid) { warnings.push("無法確認目前使用者，跳過 duplicate 偵測"); continue; }

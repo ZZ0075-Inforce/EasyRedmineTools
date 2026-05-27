@@ -23,9 +23,9 @@ const IssueHandlers = {
       } else if (source === "visited") {
         // 從 GM 儲存讀「近 7 天 /issues/{id} 訪問過」的清單
         // D 方案: cache > 1 hr stale 時 batch refresh subjects (回頭更新被異動的標題)
-        const cutoff = dateStrDaysAgo(getVisitRetentionDays());
-        let list = isVisitedSubjectsStale()
-          ? await refreshVisitedSubjects()
+        const cutoff = dateStrDaysAgo(VisitedIssuesRegistry.getRetentionDays());
+        let list = VisitedIssuesRegistry.isStale()
+          ? await VisitedIssuesRegistry.refresh()
           : (Store.get("visited_issues", []) || []);
         list = list.filter(
           (x) => x && (x.last_visited_at || "") >= cutoff
@@ -73,7 +73,7 @@ const IssueHandlers = {
 
     // 抓本人 ID 作為預設指派人（部分 tracker 必填 assignee → 422）
     let assigneeId = null;
-    try { assigneeId = await getCurrentUserId(); } catch {}
+    try { assigneeId = await CurrentUserManager.get(); } catch {}
 
     const results = [];
     for (const row of rows) {
