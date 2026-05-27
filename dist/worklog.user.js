@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605271410
+// @version      1.0.202605271437
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -3377,8 +3377,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605271410";
-const APP_BUILD_TIME = "2026-05-27 14:10";
+const APP_VERSION = "1.0.202605271437";
+const APP_BUILD_TIME = "2026-05-27 14:37";
 
 const state = {
   localToday: localDateString(new Date()),
@@ -3491,7 +3491,7 @@ const PhraseMenu = (() => {
 /* ===== Renders：state-slice → render fn 訂閱 dispatcher ==================
  * 取代「mutate state.X; renderAll()」的 shallow coordinator pattern。
  * 一次 notify(slice) 只觸發訂閱該 slice 的 render，加上一個 cross-cutting bundle。
- * 目前 phrases + draftEntries 走這條 — 其餘 state 暫時仍是 renderAll()。
+ * 目前 phrases + draftEntries + schedule 走這條 — 其餘 state 暫時仍是 renderAll()。
  */
 const Renders = (() => {
   const subs = new Map();  // sliceKey → Set<fn>
@@ -3537,6 +3537,11 @@ Renders.subscribe(["phrases"], () => {
 // 註冊 draftEntries 訂閱（entry table 與 pj-alert-stack 跟 draft 內容直接相關）
 Renders.subscribe(["draftEntries"], () => renderTable());
 Renders.subscribe(["draftEntries"], () => renderAlerts());
+
+// 註冊 schedule 訂閱（ScheduleEditor IIFE 內 stage / drag / budget mutation 後重畫）
+Renders.subscribe(["schedule"], () => ScheduleEditor.renderLeftPanel());
+Renders.subscribe(["schedule"], () => ScheduleEditor.renderRightPanel());
+Renders.subscribe(["schedule"], () => renderAlerts());
 
 // Cross-cutting：每次 notify 結尾跑一次（match renderAll 尾段）
 Renders.setCrossCutting(() => {
@@ -3759,7 +3764,7 @@ const ScheduleEditor = (() => {
         const pid = Number(event.currentTarget.dataset.selectProject);
         if (event.currentTarget.checked) selectedProjectIds.add(pid);
         else selectedProjectIds.delete(pid);
-        renderAll();
+        Renders.notify("schedule");
       });
     }
   }
@@ -3779,7 +3784,7 @@ const ScheduleEditor = (() => {
       `;
       document.getElementById("sched-back-button")?.addEventListener("click", () => {
         stage = "select";
-        renderAll();
+        Renders.notify("schedule");
       });
       return;
     }
@@ -3829,7 +3834,7 @@ const ScheduleEditor = (() => {
     `;
     document.getElementById("sched-back-button")?.addEventListener("click", () => {
       stage = "select";
-      renderAll();
+      Renders.notify("schedule");
     });
     bindScheduleEvents();
     bindScheduleDrag();
@@ -3885,7 +3890,7 @@ const ScheduleEditor = (() => {
         if (event.target.closest("[data-budget-clear]")) return;
         const iid = Number(event.currentTarget.dataset.budgetToggle);
         budgetEditIssueId = iid;
-        renderAll();
+        Renders.notify("schedule");
         const input = document.querySelector(`[data-budget-input="${iid}"]`);
         if (input) {
           input.focus();
@@ -3898,7 +3903,7 @@ const ScheduleEditor = (() => {
         event.stopPropagation();
         const iid = Number(event.currentTarget.dataset.budgetClear);
         delete budgets[iid];
-        renderAll();
+        Renders.notify("schedule");
       });
     }
     for (const input of elements.scheduleIssueList.querySelectorAll("[data-budget-input]")) {
@@ -3908,13 +3913,13 @@ const ScheduleEditor = (() => {
         if (val === "") delete budgets[iid];
         else budgets[iid] = val;
         budgetEditIssueId = null;
-        renderAll();
+        Renders.notify("schedule");
       });
       input.addEventListener("keydown", (event) => {
         if (event.key === "Enter") event.currentTarget.blur();
         else if (event.key === "Escape") {
           budgetEditIssueId = null;
-          renderAll();
+          Renders.notify("schedule");
         }
       });
     }
@@ -4001,7 +4006,7 @@ const ScheduleEditor = (() => {
         const val = e.currentTarget.value;
         if (val === "") delete budgets[iid];
         else budgets[iid] = val;
-        renderAll();
+        Renders.notify("schedule");
       });
     }
   }
@@ -4012,7 +4017,7 @@ const ScheduleEditor = (() => {
     if (from < 0 || to < 0) return;
     projectOrder.splice(from, 1);
     projectOrder.splice(to, 0, draggedId);
-    renderAll();
+    Renders.notify("schedule");
   }
 
   function reorderIssueTo(pid, draggedId, targetId) {
@@ -4023,7 +4028,7 @@ const ScheduleEditor = (() => {
     if (from < 0 || to < 0) return;
     arr.splice(from, 1);
     arr.splice(to, 0, draggedId);
-    renderAll();
+    Renders.notify("schedule");
   }
 
   function moveProject(pid, delta) {
@@ -4033,7 +4038,7 @@ const ScheduleEditor = (() => {
     if (ni < 0 || ni >= projectOrder.length) return;
     projectOrder.splice(idx, 1);
     projectOrder.splice(ni, 0, pid);
-    renderAll();
+    Renders.notify("schedule");
   }
 
   function moveIssue(pid, iid, delta) {
@@ -4044,7 +4049,7 @@ const ScheduleEditor = (() => {
     if (ni < 0 || ni >= arr.length) return;
     arr.splice(idx, 1);
     arr.splice(ni, 0, iid);
-    renderAll();
+    Renders.notify("schedule");
   }
 
   // ─── Public API ─────────────────────────────────────────────────
@@ -4093,7 +4098,7 @@ const ScheduleEditor = (() => {
       });
       commitResults = data.results || [];
     });
-    renderAll();
+    Renders.notify("schedule");
   }
 
   function renderLeftPanel() {
@@ -4124,7 +4129,7 @@ const ScheduleEditor = (() => {
       document.getElementById("schedule-start-button")?.addEventListener("click", () => {
         if (selectedProjectIds.size === 0) return;
         stage = "arrange";
-        renderAll();
+        Renders.notify("schedule");
       });
       return;
     }
@@ -4138,7 +4143,7 @@ const ScheduleEditor = (() => {
     `;
     document.getElementById("pj-schedule-back-button")?.addEventListener("click", () => {
       stage = "select";
-      renderAll();
+      Renders.notify("schedule");
     });
   }
 
