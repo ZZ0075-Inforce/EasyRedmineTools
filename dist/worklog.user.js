@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605271626
+// @version      1.0.202605271747
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -3398,8 +3398,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605271626";
-const APP_BUILD_TIME = "2026-05-27 16:26";
+const APP_VERSION = "1.0.202605271747";
+const APP_BUILD_TIME = "2026-05-27 17:47";
 
 const state = {
   localToday: localDateString(new Date()),
@@ -4195,6 +4195,66 @@ const ScheduleEditor = (() => {
   }
 
   return { enter, isActive, isReadyToApply, applyDates, renderLeftPanel, renderRightPanel, renderResults };
+})();
+
+/* ===== CommitModal：送出工時前的二次確認 modal =============================
+ * 純 UI controller：open() / close() / updateDateWarn() + 自管 5 個 modal-
+ * internal events（cancel / close btn / backdrop click / date change /
+ * data-modal-offset）；commitButton trigger 也順手自管。
+ * 業務邏輯（previewEntries → commitEntries → renderAll）由 init({onConfirm})
+ * 從主 scope 注入，不耦合到 modal。
+ */
+const CommitModal = (() => {
+  function open() {
+    const rows = selectedValidRows();
+    if (!rows.length) return;
+    elements.commitModalDate.value = state.batchSpentOn;
+    updateDateWarn();
+    const totalHours = rows.reduce((sum, e) => sum + (parseFloat(e.hours) || 0), 0);
+    elements.commitModalSummary.textContent =
+      `即將送出 ${rows.length} 筆工時，共 ${totalHours.toFixed(1)} 小時`;
+    elements.commitModal.hidden = false;
+    elements.commitModal.removeAttribute("aria-hidden");
+    elements.commitModalDate.focus();
+  }
+
+  function close() {
+    elements.commitModal.hidden = true;
+    elements.commitModal.setAttribute("aria-hidden", "true");
+  }
+
+  function updateDateWarn() {
+    const selected = elements.commitModalDate.value;
+    const today = daysAgoString(0);
+    const yesterday = daysAgoString(1);
+    if (selected && selected !== today && selected !== yesterday) {
+      elements.commitModalDateWarn.textContent =
+        `注意：所選日期 ${selected} 不是今天或昨天，請確認是否正確`;
+      elements.commitModalDateWarn.hidden = false;
+    } else {
+      elements.commitModalDateWarn.hidden = true;
+    }
+  }
+
+  function init({ onConfirm }) {
+    elements.commitButton.addEventListener("click", open);
+    elements.commitModalConfirm.addEventListener("click", onConfirm);
+    elements.commitModalCancel.addEventListener("click", close);
+    elements.commitModalClose.addEventListener("click", close);
+    elements.commitModal.addEventListener("click", (e) => {
+      if (e.target === elements.commitModal) close();
+    });
+    elements.commitModalDate.addEventListener("change", updateDateWarn);
+    for (const btn of document.querySelectorAll("[data-modal-offset]")) {
+      btn.addEventListener("click", (e) => {
+        const offset = Number(e.currentTarget.dataset.modalOffset);
+        elements.commitModalDate.value = daysAgoString(offset);
+        updateDateWarn();
+      });
+    }
+  }
+
+  return { open, close, init };
 })();
 
 const THEME_KEY = "lawpj.theme";
@@ -5498,37 +5558,6 @@ function updateAboutInfo() {
   if (b) b.textContent = APP_BUILD_TIME;
 }
 
-function openCommitModal() {
-  const rows = selectedValidRows();
-  if (!rows.length) return;
-  elements.commitModalDate.value = state.batchSpentOn;
-  updateCommitModalDateWarn();
-  const totalHours = rows.reduce((sum, e) => sum + (parseFloat(e.hours) || 0), 0);
-  elements.commitModalSummary.textContent =
-    `即將送出 ${rows.length} 筆工時，共 ${totalHours.toFixed(1)} 小時`;
-  elements.commitModal.hidden = false;
-  elements.commitModal.removeAttribute("aria-hidden");
-  elements.commitModalDate.focus();
-}
-
-function closeCommitModal() {
-  elements.commitModal.hidden = true;
-  elements.commitModal.setAttribute("aria-hidden", "true");
-}
-
-function updateCommitModalDateWarn() {
-  const selected = elements.commitModalDate.value;
-  const today = daysAgoString(0);
-  const yesterday = daysAgoString(1);
-  if (selected && selected !== today && selected !== yesterday) {
-    elements.commitModalDateWarn.textContent =
-      `注意：所選日期 ${selected} 不是今天或昨天，請確認是否正確`;
-    elements.commitModalDateWarn.hidden = false;
-  } else {
-    elements.commitModalDateWarn.hidden = true;
-  }
-}
-
 function initThemeButtons() {
   for (const btn of document.querySelectorAll("[data-theme-value]")) {
     btn.addEventListener("click", () => {
@@ -6362,49 +6391,33 @@ elements.queryAddButton.addEventListener("click", async () => {
   }
 });
 
-elements.commitButton.addEventListener("click", () => {
-  openCommitModal();
+CommitModal.init({
+  onConfirm: async () => {
+    const selectedDate = elements.commitModalDate.value;
+    if (selectedDate !== state.batchSpentOn) {
+      state.batchSpentOn = selectedDate;
+      clearAllEntryPreviewState();
+    }
+    CommitModal.close();
+    try {
+      await withLoading("送出到 Redmine 中...", async () => {
+        await previewEntries();
+        const hasFieldErrors = state.draftEntries.some(
+          (e) => Object.keys(e.errors || {}).length > 0
+        );
+        if (!state.previewToken || hasFieldErrors) {
+          throw new Error("驗證未通過，請檢查欄位後再送出");
+        }
+        await commitEntries();
+      });
+      renderAll();
+    } catch (error) {
+      state.commitResults = [];
+      state.previewWarnings = [error.message || String(error)];
+      renderAll();
+    }
+  },
 });
-
-elements.commitModalConfirm.addEventListener("click", async () => {
-  const selectedDate = elements.commitModalDate.value;
-  if (selectedDate !== state.batchSpentOn) {
-    state.batchSpentOn = selectedDate;
-    clearAllEntryPreviewState();
-  }
-  closeCommitModal();
-  try {
-    await withLoading("送出到 Redmine 中...", async () => {
-      await previewEntries();
-      const hasFieldErrors = state.draftEntries.some(
-        (e) => Object.keys(e.errors || {}).length > 0
-      );
-      if (!state.previewToken || hasFieldErrors) {
-        throw new Error("驗證未通過，請檢查欄位後再送出");
-      }
-      await commitEntries();
-    });
-    renderAll();
-  } catch (error) {
-    state.commitResults = [];
-    state.previewWarnings = [error.message || String(error)];
-    renderAll();
-  }
-});
-
-elements.commitModalCancel.addEventListener("click", closeCommitModal);
-elements.commitModalClose.addEventListener("click", closeCommitModal);
-elements.commitModal.addEventListener("click", (e) => {
-  if (e.target === elements.commitModal) closeCommitModal();
-});
-elements.commitModalDate.addEventListener("change", updateCommitModalDateWarn);
-for (const btn of document.querySelectorAll("[data-modal-offset]")) {
-  btn.addEventListener("click", (e) => {
-    const offset = Number(e.currentTarget.dataset.modalOffset);
-    elements.commitModalDate.value = daysAgoString(offset);
-    updateCommitModalDateWarn();
-  });
-}
 
 elements.batchSpentOn.addEventListener("change", (event) => {
   state.batchSpentOn = event.target.value;
