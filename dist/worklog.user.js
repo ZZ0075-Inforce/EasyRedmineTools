@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605272147
+// @version      1.0.202605272150
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -285,6 +285,7 @@ const APP_HTML = `<div class="pj-app-shell">
             <div class="pj-batch-row-actions">
               <button class="pj-ghost-button" id="batch-add-blank-row-button">新增空白列</button>
               <button class="pj-ghost-button" id="batch-clear-rows-button">全部清空</button>
+              <button class="pj-ghost-button" id="ai-suggest-open-button" title="呼叫 Gemini Agent 建議 issue">✨ AI 建議</button>
             </div>
             <div class="pj-table-wrap">
               <table class="pj-batch-rows-table" id="pj-batch-rows-table">
@@ -424,6 +425,31 @@ const APP_HTML = `<div class="pj-app-shell">
 
     <!-- Toast container（短暫操作反饋） -->
     <div id="pj-toast-container" class="pj-toast-container" aria-live="polite" aria-atomic="false"></div>
+
+    <div id="ai-suggest-modal" class="pj-modal-overlay" hidden aria-hidden="true">
+      <div class="pj-modal-box" role="dialog" aria-modal="true" aria-labelledby="ai-suggest-modal-title">
+        <div class="pj-modal-header">
+          <h3 id="ai-suggest-modal-title">✨ AI 建議 issue</h3>
+          <button class="pj-modal-x" id="ai-suggest-modal-close" aria-label="關閉">&times;</button>
+        </div>
+        <div class="pj-modal-body">
+          <div class="muted" id="ai-suggest-agent-label">Agent: 批次建 issue Agent</div>
+          <label class="pj-field-stack ai-suggest-input-wrap">
+            <span>任務 / 角色 / 背景</span>
+            <textarea id="ai-suggest-input" rows="6" placeholder="例如：我是後端工程師，本週要幫 ITG040 加入會員登入。請建 5-8 筆 issue 涵蓋 DB schema / API / 測試 / docs"></textarea>
+          </label>
+          <div class="ai-suggest-actions">
+            <button type="button" class="btn btn-secondary" id="ai-suggest-generate">生成建議</button>
+            <span class="muted" id="ai-suggest-status"></span>
+          </div>
+          <div id="ai-suggest-results" class="ai-suggest-results"></div>
+        </div>
+        <div class="pj-modal-footer">
+          <button class="btn btn-secondary" id="ai-suggest-modal-cancel">取消</button>
+          <button class="btn btn-primary" id="ai-suggest-apply" disabled>加入勾選項</button>
+        </div>
+      </div>
+    </div>
 
     <div id="commit-modal" class="pj-modal-overlay" hidden aria-hidden="true">
       <div class="pj-modal-box" role="dialog" aria-modal="true" aria-labelledby="commit-modal-title">
@@ -3482,8 +3508,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605272147";
-const APP_BUILD_TIME = "2026-05-27 21:47";
+const APP_VERSION = "1.0.202605272150";
+const APP_BUILD_TIME = "2026-05-27 21:50";
 
 const state = {
   localToday: localDateString(new Date()),
@@ -4342,6 +4368,152 @@ const CommitModal = (() => {
   return { open, close, init };
 })();
 
+/* ===== AISuggestModal：呼叫 Gemini 產 issue 建議的 modal =====================
+ * 公開 open(agentTypeId) / close() / init()。
+ * open 設當前 agent → render label → modal show; user 填任務 textarea →
+ * 按「生成建議」→ GeminiClient.generate(model, sysprompt, userInput, schema)
+ *  → AGENT_TYPES[agentId].parseResponse(data) → 渲染勾選 list (預設全勾)
+ *  → 按「加入勾選項」→ for each selected item → state.batchRows.push(makeRow
+ *    + 帶 estimated_hours / start_date / due_date) → IssueBatchEditor.render()
+ *  → close()。
+ * 錯誤路徑（沒 API key / Gemini 4xx-5xx / parse 失敗）都寫進 #ai-suggest-status
+ * + console.error 原始回應 debug。
+ */
+const AISuggestModal = (() => {
+  let currentAgentId = null;
+  let suggestions = [];
+  let selectedIdx = new Set();
+
+  function open(agentTypeId) {
+    const type = AGENT_TYPES[agentTypeId];
+    if (!type) {
+      showToast("Unknown agent type: " + agentTypeId, { type: "error" });
+      return;
+    }
+    const apiKey = (Store.get("gemini_api_key", "") || "").trim();
+    if (!apiKey) {
+      showToast("請先在 batch view 的「⚙️ AI 設定」內填 Gemini API Key", { type: "error" });
+      return;
+    }
+    currentAgentId = agentTypeId;
+    suggestions = [];
+    selectedIdx = new Set();
+    elements.aiSuggestAgentLabel.textContent = `Agent: ${type.label}`;
+    elements.aiSuggestInput.value = "";
+    elements.aiSuggestStatus.textContent = "";
+    elements.aiSuggestResults.innerHTML = "";
+    elements.aiSuggestApply.disabled = true;
+    elements.aiSuggestModal.hidden = false;
+    elements.aiSuggestModal.removeAttribute("aria-hidden");
+    elements.aiSuggestInput.focus();
+  }
+
+  function close() {
+    elements.aiSuggestModal.hidden = true;
+    elements.aiSuggestModal.setAttribute("aria-hidden", "true");
+  }
+
+  async function generate() {
+    if (!currentAgentId) return;
+    const userInput = elements.aiSuggestInput.value.trim();
+    if (!userInput) {
+      elements.aiSuggestStatus.textContent = "請先填入任務 / 角色 / 背景";
+      return;
+    }
+    const type = AGENT_TYPES[currentAgentId];
+    const cfg = AgentSettings.get(currentAgentId);
+    elements.aiSuggestGenerate.disabled = true;
+    elements.aiSuggestStatus.textContent = "AI 生成中…";
+    elements.aiSuggestResults.innerHTML = "";
+    try {
+      const data = await GeminiClient.generate(cfg.model, cfg.sysprompt, userInput, type.outputSchema);
+      const items = type.parseResponse(data);
+      if (!items.length) {
+        elements.aiSuggestStatus.textContent = "AI 沒回任何建議，請調整任務描述或 sysprompt 再試";
+        return;
+      }
+      suggestions = items;
+      selectedIdx = new Set(items.map((_, i) => i));  // 預設全勾
+      renderResults();
+      elements.aiSuggestStatus.textContent = `已產生 ${items.length} 筆建議（預設全勾，可取消不需要的）`;
+      elements.aiSuggestApply.disabled = false;
+    } catch (err) {
+      console.error("[AISuggest] generate failed:", err);
+      elements.aiSuggestStatus.textContent = "生成失敗：" + (err.message || String(err));
+    } finally {
+      elements.aiSuggestGenerate.disabled = false;
+    }
+  }
+
+  function renderResults() {
+    elements.aiSuggestResults.innerHTML = suggestions.map((it, i) => {
+      const checked = selectedIdx.has(i) ? "checked" : "";
+      const metaParts = [];
+      if (Number.isFinite(Number(it.estimated_hours)) && Number(it.estimated_hours) > 0) {
+        metaParts.push(`${Number(it.estimated_hours)} h`);
+      }
+      if (it.start_date) metaParts.push(`start ${escapeHtml(it.start_date)}`);
+      if (it.due_date) metaParts.push(`due ${escapeHtml(it.due_date)}`);
+      const meta = metaParts.length ? `<div class="muted">${metaParts.join(" · ")}</div>` : "";
+      const rationale = it.rationale
+        ? `<div class="muted ai-suggest-rationale">${escapeHtml(it.rationale)}</div>` : "";
+      return `
+        <label class="ai-suggest-card">
+          <input type="checkbox" data-ai-suggest-idx="${i}" ${checked}>
+          <div class="ai-suggest-card-body">
+            <div class="ai-suggest-subject">${escapeHtml(it.subject)}</div>
+            ${meta}
+            ${rationale}
+          </div>
+        </label>
+      `;
+    }).join("");
+    for (const cb of elements.aiSuggestResults.querySelectorAll("[data-ai-suggest-idx]")) {
+      cb.addEventListener("change", (e) => {
+        const idx = Number(e.currentTarget.dataset.aiSuggestIdx);
+        if (e.currentTarget.checked) selectedIdx.add(idx);
+        else selectedIdx.delete(idx);
+        elements.aiSuggestApply.disabled = selectedIdx.size === 0;
+      });
+    }
+  }
+
+  function applySelected() {
+    if (!selectedIdx.size) return;
+    for (const idx of selectedIdx) {
+      const it = suggestions[idx];
+      if (!it) continue;
+      const row = IssueBatchEditor.makeRow(it.subject || "", null);
+      if (Number.isFinite(Number(it.estimated_hours)) && Number(it.estimated_hours) > 0) {
+        row.estimated_hours = String(Number(it.estimated_hours));
+      }
+      if (typeof it.start_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(it.start_date)) {
+        row.start_date = it.start_date;
+      }
+      if (typeof it.due_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(it.due_date)) {
+        row.due_date = it.due_date;
+      }
+      state.batchRows.push(row);
+    }
+    state.batchWarnings = [];
+    IssueBatchEditor.render();
+    showToast(`已加入 ${selectedIdx.size} 筆建議`);
+    close();
+  }
+
+  function init() {
+    elements.aiSuggestGenerate.addEventListener("click", generate);
+    elements.aiSuggestApply.addEventListener("click", applySelected);
+    elements.aiSuggestModalClose.addEventListener("click", close);
+    elements.aiSuggestModalCancel.addEventListener("click", close);
+    elements.aiSuggestModal.addEventListener("click", (e) => {
+      if (e.target === elements.aiSuggestModal) close();
+    });
+  }
+
+  return { open, close, init };
+})();
+
 /* ===== SavedQueryManager：PJ 篩選器 view CRUD =============================
  * 公開 render() / init() 兩個 entry; render() 也兼 list 內 remove 按鈕的
  * inline binding（render → bind 同一輪 click 觸發 remove flow）。
@@ -4539,6 +4711,16 @@ const elements = {
   aiSettingsSave: document.getElementById("ai-settings-save"),
   aiSettingsReset: document.getElementById("ai-settings-reset"),
   aiSettingsStatus: document.getElementById("ai-settings-status"),
+  aiSuggestOpenButton: document.getElementById("ai-suggest-open-button"),
+  aiSuggestModal: document.getElementById("ai-suggest-modal"),
+  aiSuggestModalClose: document.getElementById("ai-suggest-modal-close"),
+  aiSuggestModalCancel: document.getElementById("ai-suggest-modal-cancel"),
+  aiSuggestAgentLabel: document.getElementById("ai-suggest-agent-label"),
+  aiSuggestInput: document.getElementById("ai-suggest-input"),
+  aiSuggestGenerate: document.getElementById("ai-suggest-generate"),
+  aiSuggestStatus: document.getElementById("ai-suggest-status"),
+  aiSuggestResults: document.getElementById("ai-suggest-results"),
+  aiSuggestApply: document.getElementById("ai-suggest-apply"),
 };
 
 /* ===== Toast：短暫操作反饋 (success / error / info)，自動消失 ============== */
@@ -6550,9 +6732,15 @@ const IssueBatchEditor = (() => {
         }
       });
     }
+    if (elements.aiSuggestOpenButton) {
+      elements.aiSuggestOpenButton.addEventListener("click", () => {
+        AISuggestModal.open("batch-issue");
+      });
+    }
+    AISuggestModal.init();
   }
 
-  return { render, init, toggleIssueDefault, syncProjectProgress };
+  return { render, init, toggleIssueDefault, syncProjectProgress, makeRow };
 })();
 
 async function previewEntries() {

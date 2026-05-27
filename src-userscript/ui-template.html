@@ -2015,6 +2015,7 @@
             <div class="batch-row-actions">
               <button class="ghost-button" id="batch-add-blank-row-button">新增空白列</button>
               <button class="ghost-button" id="batch-clear-rows-button">全部清空</button>
+              <button class="ghost-button" id="ai-suggest-open-button" title="呼叫 Gemini Agent 建議 issue">✨ AI 建議</button>
             </div>
             <div class="table-wrap">
               <table class="batch-rows-table" id="batch-rows-table">
@@ -2154,6 +2155,31 @@
 
     <!-- Toast container（短暫操作反饋） -->
     <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="false"></div>
+
+    <div id="ai-suggest-modal" class="modal-overlay" hidden aria-hidden="true">
+      <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="ai-suggest-modal-title">
+        <div class="modal-header">
+          <h3 id="ai-suggest-modal-title">✨ AI 建議 issue</h3>
+          <button class="modal-x" id="ai-suggest-modal-close" aria-label="關閉">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="muted" id="ai-suggest-agent-label">Agent: 批次建 issue Agent</div>
+          <label class="field-stack ai-suggest-input-wrap">
+            <span>任務 / 角色 / 背景</span>
+            <textarea id="ai-suggest-input" rows="6" placeholder="例如：我是後端工程師，本週要幫 ITG040 加入會員登入。請建 5-8 筆 issue 涵蓋 DB schema / API / 測試 / docs"></textarea>
+          </label>
+          <div class="ai-suggest-actions">
+            <button type="button" class="btn btn-secondary" id="ai-suggest-generate">生成建議</button>
+            <span class="muted" id="ai-suggest-status"></span>
+          </div>
+          <div id="ai-suggest-results" class="ai-suggest-results"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="ai-suggest-modal-cancel">取消</button>
+          <button class="btn btn-primary" id="ai-suggest-apply" disabled>加入勾選項</button>
+        </div>
+      </div>
+    </div>
 
     <div id="commit-modal" class="modal-overlay" hidden aria-hidden="true">
       <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="commit-modal-title">
