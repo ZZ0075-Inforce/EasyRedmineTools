@@ -1194,14 +1194,6 @@ const elements = {
   inlineDefaultPhraseStatus: document.getElementById("inline-default-phrase-status"),
   inlineToolbarEnabledToggle: document.getElementById("inline-toolbar-enabled-toggle"),
   inlineToolbarEnabledStatus: document.getElementById("inline-toolbar-enabled-status"),
-  aiApiKeyInput: document.getElementById("ai-api-key-input"),
-  aiAgentTypeSelect: document.getElementById("ai-agent-type-select"),
-  aiModelSelect: document.getElementById("ai-model-select"),
-  aiModelCustomInput: document.getElementById("ai-model-custom-input"),
-  aiSyspromptInput: document.getElementById("ai-sysprompt-input"),
-  aiSettingsSave: document.getElementById("ai-settings-save"),
-  aiSettingsReset: document.getElementById("ai-settings-reset"),
-  aiSettingsStatus: document.getElementById("ai-settings-status"),
   aiSuggestOpenButton: document.getElementById("ai-suggest-open-button"),
   aiSuggestModal: document.getElementById("ai-suggest-modal"),
   aiSuggestModalClose: document.getElementById("ai-suggest-modal-close"),
@@ -2524,6 +2516,7 @@ const InlineToolsConfig = (() => {
  */
 const AGENT_TYPES = {
   "batch-issue": {
+    targetView: "issue-batch",
     label: "批次建 issue Agent",
     defaultSysprompt:
       "你是專案管理助手。根據 user 提供的角色與任務背景，建議要建立的 Redmine issue。\n" +
@@ -2557,6 +2550,13 @@ const AGENT_TYPES = {
   },
   // 未來: "schedule": {...}, "worklog": {...}
 };
+
+function findAgentForView(viewKey) {
+  for (const [id, type] of Object.entries(AGENT_TYPES)) {
+    if (type.targetView === viewKey) return id;
+  }
+  return null;
+}
 
 const AGENT_MODEL_OPTIONS = [
   "gemma-4-26b-it",
@@ -2602,6 +2602,13 @@ const AgentSettings = (() => {
   return { get, save, reset };
 })();
 
+// 暴露給 settings-patch.js（outer scope）使用，因為 AGENT_TYPES / AgentSettings
+// / findAgentForView / AGENT_MODEL_OPTIONS 都宣告在 __initWorklogApp() 內部。
+window.__worklog_AGENT_TYPES = AGENT_TYPES;
+window.__worklog_AGENT_MODEL_OPTIONS = AGENT_MODEL_OPTIONS;
+window.__worklog_AgentSettings = AgentSettings;
+window.__worklog_findAgentForView = findAgentForView;
+
 /* ===== IssueBatchEditor：批次建 issue view (templates + rows + submit) =====
  * 收: 14 個 view fn + module-level row uid counter + 9 個主 scope handler
  * + toggleIssueDefault (跨 view 給 worklog 端 phrase menu 用)。
@@ -2610,75 +2617,7 @@ const AgentSettings = (() => {
 const IssueBatchEditor = (() => {
   let rowUidCounter = 1;
 
-  let aiSettingsBound = false;
-
   function nextRowUid() { return "br-" + (rowUidCounter++); }
-
-  function renderAISettings() {
-    if (!elements.aiAgentTypeSelect) return;
-
-    // Agent type dropdown（首次 populate）
-    if (!elements.aiAgentTypeSelect.options.length) {
-      elements.aiAgentTypeSelect.innerHTML = Object.entries(AGENT_TYPES)
-        .map(([id, t]) => `<option value="${escapeHtml(id)}">${escapeHtml(t.label)}</option>`)
-        .join("");
-    }
-
-    // Model dropdown（首次 populate）
-    if (!elements.aiModelSelect.options.length) {
-      elements.aiModelSelect.innerHTML = AGENT_MODEL_OPTIONS
-        .map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`)
-        .join("");
-    }
-
-    // API key
-    elements.aiApiKeyInput.value = Store.get("gemini_api_key", "") || "";
-
-    // 當前 agent 的 sysprompt + model
-    const agentId = elements.aiAgentTypeSelect.value || Object.keys(AGENT_TYPES)[0];
-    if (!elements.aiAgentTypeSelect.value) elements.aiAgentTypeSelect.value = agentId;
-    const cfg = AgentSettings.get(agentId);
-    elements.aiSyspromptInput.value = cfg.sysprompt;
-    if (AGENT_MODEL_OPTIONS.includes(cfg.model)) {
-      elements.aiModelSelect.value = cfg.model;
-      elements.aiModelCustomInput.value = "";
-    } else {
-      elements.aiModelSelect.value = AGENT_MODEL_OPTIONS[0];
-      elements.aiModelCustomInput.value = cfg.model;
-    }
-
-    if (!aiSettingsBound) {
-      aiSettingsBound = true;
-      bindAISettings();
-    }
-  }
-
-  function bindAISettings() {
-    elements.aiAgentTypeSelect.addEventListener("change", renderAISettings);
-
-    elements.aiSettingsSave.addEventListener("click", () => {
-      const agentId = elements.aiAgentTypeSelect.value;
-      Store.set("gemini_api_key", elements.aiApiKeyInput.value.trim());
-      const custom = elements.aiModelCustomInput.value.trim();
-      const model = custom || elements.aiModelSelect.value;
-      AgentSettings.save(agentId, {
-        sysprompt: elements.aiSyspromptInput.value,
-        model,
-      });
-      if (elements.aiSettingsStatus) {
-        elements.aiSettingsStatus.textContent = `已儲存（model: ${model}）`;
-      }
-    });
-
-    elements.aiSettingsReset.addEventListener("click", () => {
-      const agentId = elements.aiAgentTypeSelect.value;
-      AgentSettings.reset(agentId);
-      renderAISettings();
-      if (elements.aiSettingsStatus) {
-        elements.aiSettingsStatus.textContent = "已重設為預設";
-      }
-    });
-  }
 
   function makeRow(subject = "", templateId = null) {
     return {
@@ -2777,7 +2716,6 @@ const IssueBatchEditor = (() => {
 
   function render() {
     if (!elements.batchProjectInput) return;
-    renderAISettings();
     renderProjectsDatalist();
     renderTrackerSelect();
     renderTemplatesPicker();

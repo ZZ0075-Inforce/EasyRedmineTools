@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605272150
+// @version      1.0.202605280006
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -232,39 +232,6 @@ const APP_HTML = `<div class="pj-app-shell">
           </section>
 
           <section class="pj-batch-section">
-            <details class="ai-settings-section" id="ai-settings-section">
-              <summary>⚙️ AI 設定（API Key + Sysprompt + 模型）</summary>
-              <div class="ai-settings-body">
-                <label class="pj-field-stack">
-                  <span>Gemini API Key</span>
-                  <input type="password" id="ai-api-key-input" placeholder="貼上 Google AI Studio 的 API Key" autocomplete="off">
-                </label>
-                <label class="pj-field-stack">
-                  <span>Agent</span>
-                  <select id="ai-agent-type-select"></select>
-                </label>
-                <label class="pj-field-stack">
-                  <span>模型</span>
-                  <select id="ai-model-select"></select>
-                </label>
-                <label class="pj-field-stack">
-                  <span>自訂模型 ID（覆寫上方選擇，可留空）</span>
-                  <input type="text" id="ai-model-custom-input" placeholder="例如 gemini-2.5-pro 或新發布的 model id">
-                </label>
-                <label class="pj-field-stack">
-                  <span>Sysprompt</span>
-                  <textarea id="ai-sysprompt-input" rows="8"></textarea>
-                </label>
-                <div class="ai-settings-actions">
-                  <button type="button" class="pj-action-button" id="ai-settings-save">儲存</button>
-                  <button type="button" class="pj-ghost-button" id="ai-settings-reset">重設為預設</button>
-                  <span class="muted" id="ai-settings-status"></span>
-                </div>
-              </div>
-            </details>
-          </section>
-
-          <section class="pj-batch-section">
             <div class="pj-batch-section-header">
               <h3 class="pj-section-subtitle">Issue 模板</h3>
               <span class="muted">勾選即加入下方表格；取消勾選即移除；點 ✎ 編輯、🗑 刪除</span>
@@ -377,6 +344,7 @@ const APP_HTML = `<div class="pj-app-shell">
         <div class="pj-settings-modal-content">
           <div class="pj-settings-tabs" role="tablist" aria-orientation="vertical">
             <button class="pj-settings-tab active" data-settings-tab="appearance" role="tab">外觀</button>
+            <button class="pj-settings-tab" data-settings-tab="ai" role="tab">AI 助手</button>
             <button class="pj-settings-tab" data-settings-tab="about" role="tab">關於</button>
           </div>
           <div class="pj-modal-body pj-settings-modal-body">
@@ -386,6 +354,16 @@ const APP_HTML = `<div class="pj-app-shell">
                 <button class="pj-theme-option" data-theme-value="light">淺色</button>
                 <button class="pj-theme-option" data-theme-value="dark">深色</button>
               </div>
+            </section>
+
+            <section class="pj-settings-group" data-settings-section="ai">
+              <div class="pj-settings-group-hint">Gemini AI 助手全域設定。每個功能 view 的 Agent sysprompt 跟模型在各功能 tab 內。</div>
+              <label class="pj-field-stack">
+                <span>Gemini API Key</span>
+                <input type="password" id="setting-gemini-api-key" placeholder="貼上 Google AI Studio 的 API Key" autocomplete="off">
+                <span class="muted">本地 GM 儲存，不外傳。所有 AI Agent 共用同一把 key。</span>
+              </label>
+              <div id="setting-gemini-api-key-status" class="muted" style="font-size:13px; min-height:18px; margin-top:6px;"></div>
             </section>
 
             <section class="pj-settings-group" data-settings-section="about">
@@ -2672,6 +2650,51 @@ function applySettingsPatches(root) {
     return `<div class="pj-settings-group-hint">本功能尚無可設定的預設值，未來會陸續加入。</div>`;
   }
 
+  // 若該 view 對應有 AI Agent，回傳 collapsible AI section HTML；無則回空字串
+  function renderViewAiSectionHtml(viewKey) {
+    const find = window.__worklog_findAgentForView;
+    const AGENT_TYPES = window.__worklog_AGENT_TYPES;
+    const AGENT_MODEL_OPTIONS = window.__worklog_AGENT_MODEL_OPTIONS;
+    const AgentSettings = window.__worklog_AgentSettings;
+    if (!find || !AGENT_TYPES || !AgentSettings) return "";
+    const agentId = find(viewKey);
+    if (!agentId) return "";
+    const type = AGENT_TYPES[agentId];
+    const cfg = AgentSettings.get(agentId);
+    const inOptions = (AGENT_MODEL_OPTIONS || []).includes(cfg.model);
+    const modelOptions = (AGENT_MODEL_OPTIONS || [])
+      .map((m) => `<option value="${m}" ${m === cfg.model ? "selected" : ""}>${m}</option>`)
+      .join("");
+    const customModel = inOptions ? "" : cfg.model;
+    const safeSysprompt = (cfg.sysprompt || "")
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return `
+      <details class="settings-ai-section" style="margin-top: 24px;">
+        <summary>✨ AI Agent 設定</summary>
+        <div class="pj-field-stack" style="margin-top: 12px;">
+          <span class="muted">Agent: <strong>${type.label}</strong></span>
+          <label class="pj-field-stack" style="margin-top: 12px;">
+            <span>模型</span>
+            <select data-ai-agent-model="${agentId}">${modelOptions}</select>
+          </label>
+          <label class="pj-field-stack" style="margin-top: 12px;">
+            <span>自訂模型 ID（覆寫上方選擇，可留空）</span>
+            <input type="text" data-ai-agent-custom-model="${agentId}" value="${customModel}" placeholder="例如 gemini-2.5-pro 或新發布的 model id">
+          </label>
+          <label class="pj-field-stack" style="margin-top: 12px;">
+            <span>Sysprompt</span>
+            <textarea data-ai-agent-sysprompt="${agentId}" rows="8">${safeSysprompt}</textarea>
+          </label>
+          <div class="ai-settings-actions" style="display:flex; gap:8px; align-items:center; margin-top: 12px;">
+            <button type="button" class="pj-action-button" data-ai-agent-save="${agentId}">儲存</button>
+            <button type="button" class="pj-ghost-button" data-ai-agent-reset="${agentId}">重設為預設</button>
+            <span class="muted" data-ai-agent-status="${agentId}" style="font-size:13px;"></span>
+          </div>
+        </div>
+      </details>
+    `;
+  }
+
   const appearanceTabEl = tabBar.querySelector('[data-settings-tab="appearance"]');
   const appearanceSection = body.querySelector('[data-settings-section="appearance"]');
   let lastTab = appearanceTabEl;
@@ -2689,7 +2712,7 @@ function applySettingsPatches(root) {
     const sec = document.createElement("section");
     sec.className = "pj-settings-group";
     sec.dataset.settingsSection = v.key;
-    sec.innerHTML = renderViewSectionHtml(v.key);
+    sec.innerHTML = renderViewSectionHtml(v.key) + renderViewAiSectionHtml(v.key);
     lastSection.insertAdjacentElement("afterend", sec);
     lastSection = sec;
   }
@@ -2743,6 +2766,62 @@ function applySettingsPatches(root) {
       const label = labels[v] || `${v} 天前`;
       if (offsetStatus) offsetStatus.textContent = `已儲存：預設「${label}」（下次開啟生效）`;
     });
+  }
+
+  // ===== AI 助手 tab：Gemini API Key bind =====
+  const aiKeyInput = body.querySelector("#setting-gemini-api-key");
+  const aiKeyStatus = body.querySelector("#setting-gemini-api-key-status");
+  if (aiKeyInput) {
+    aiKeyInput.value = String(Store.get("gemini_api_key", "") || "");
+    const persistAiKey = () => {
+      Store.set("gemini_api_key", aiKeyInput.value.trim());
+      if (aiKeyStatus) {
+        aiKeyStatus.textContent = aiKeyInput.value.trim()
+          ? "已儲存（所有 AI Agent 共用）"
+          : "已清除 API Key";
+      }
+    };
+    aiKeyInput.addEventListener("change", persistAiKey);
+    aiKeyInput.addEventListener("blur", persistAiKey);
+  }
+
+  // ===== Per-view AI Agent section：sysprompt / model bind =====
+  const AgentSettings = window.__worklog_AgentSettings;
+  const AGENT_TYPES = window.__worklog_AGENT_TYPES;
+  if (AgentSettings && AGENT_TYPES) {
+    for (const saveBtn of body.querySelectorAll("[data-ai-agent-save]")) {
+      saveBtn.addEventListener("click", () => {
+        const agentId = saveBtn.dataset.aiAgentSave;
+        const sysprompt = body.querySelector(`[data-ai-agent-sysprompt="${agentId}"]`)?.value || "";
+        const customInput = body.querySelector(`[data-ai-agent-custom-model="${agentId}"]`);
+        const modelSelect = body.querySelector(`[data-ai-agent-model="${agentId}"]`);
+        const custom = customInput ? customInput.value.trim() : "";
+        const model = custom || (modelSelect ? modelSelect.value : "");
+        AgentSettings.save(agentId, { sysprompt, model });
+        const status = body.querySelector(`[data-ai-agent-status="${agentId}"]`);
+        if (status) status.textContent = `已儲存（model: ${model}）`;
+      });
+    }
+    for (const resetBtn of body.querySelectorAll("[data-ai-agent-reset]")) {
+      resetBtn.addEventListener("click", () => {
+        const agentId = resetBtn.dataset.aiAgentReset;
+        AgentSettings.reset(agentId);
+        const cfg = AgentSettings.get(agentId);
+        const sysprompt = body.querySelector(`[data-ai-agent-sysprompt="${agentId}"]`);
+        const customInput = body.querySelector(`[data-ai-agent-custom-model="${agentId}"]`);
+        const modelSelect = body.querySelector(`[data-ai-agent-model="${agentId}"]`);
+        const AGENT_MODEL_OPTIONS = window.__worklog_AGENT_MODEL_OPTIONS || [];
+        if (sysprompt) sysprompt.value = cfg.sysprompt;
+        if (AGENT_MODEL_OPTIONS.includes(cfg.model)) {
+          if (modelSelect) modelSelect.value = cfg.model;
+          if (customInput) customInput.value = "";
+        } else {
+          if (customInput) customInput.value = cfg.model;
+        }
+        const status = body.querySelector(`[data-ai-agent-status="${agentId}"]`);
+        if (status) status.textContent = "已重設為預設";
+      });
+    }
   }
 
   // tab 切換 click 由既有 worklog_app.js 的 [data-settings-tab] querySelectorAll
@@ -3508,8 +3587,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605272150";
-const APP_BUILD_TIME = "2026-05-27 21:50";
+const APP_VERSION = "1.0.202605280006";
+const APP_BUILD_TIME = "2026-05-28 00:06";
 
 const state = {
   localToday: localDateString(new Date()),
@@ -4703,14 +4782,6 @@ const elements = {
   inlineDefaultPhraseStatus: document.getElementById("inline-default-phrase-status"),
   inlineToolbarEnabledToggle: document.getElementById("inline-toolbar-enabled-toggle"),
   inlineToolbarEnabledStatus: document.getElementById("inline-toolbar-enabled-status"),
-  aiApiKeyInput: document.getElementById("ai-api-key-input"),
-  aiAgentTypeSelect: document.getElementById("ai-agent-type-select"),
-  aiModelSelect: document.getElementById("ai-model-select"),
-  aiModelCustomInput: document.getElementById("ai-model-custom-input"),
-  aiSyspromptInput: document.getElementById("ai-sysprompt-input"),
-  aiSettingsSave: document.getElementById("ai-settings-save"),
-  aiSettingsReset: document.getElementById("ai-settings-reset"),
-  aiSettingsStatus: document.getElementById("ai-settings-status"),
   aiSuggestOpenButton: document.getElementById("ai-suggest-open-button"),
   aiSuggestModal: document.getElementById("ai-suggest-modal"),
   aiSuggestModalClose: document.getElementById("ai-suggest-modal-close"),
@@ -6022,6 +6093,7 @@ const InlineToolsConfig = (() => {
  */
 const AGENT_TYPES = {
   "batch-issue": {
+    targetView: "issue-batch",
     label: "批次建 issue Agent",
     defaultSysprompt:
       "你是專案管理助手。根據 user 提供的角色與任務背景，建議要建立的 Redmine issue。\n" +
@@ -6055,6 +6127,13 @@ const AGENT_TYPES = {
   },
   // 未來: "schedule": {...}, "worklog": {...}
 };
+
+function findAgentForView(viewKey) {
+  for (const [id, type] of Object.entries(AGENT_TYPES)) {
+    if (type.targetView === viewKey) return id;
+  }
+  return null;
+}
 
 const AGENT_MODEL_OPTIONS = [
   "gemma-4-26b-it",
@@ -6100,6 +6179,13 @@ const AgentSettings = (() => {
   return { get, save, reset };
 })();
 
+// 暴露給 settings-patch.js（outer scope）使用，因為 AGENT_TYPES / AgentSettings
+// / findAgentForView / AGENT_MODEL_OPTIONS 都宣告在 __initWorklogApp() 內部。
+window.__worklog_AGENT_TYPES = AGENT_TYPES;
+window.__worklog_AGENT_MODEL_OPTIONS = AGENT_MODEL_OPTIONS;
+window.__worklog_AgentSettings = AgentSettings;
+window.__worklog_findAgentForView = findAgentForView;
+
 /* ===== IssueBatchEditor：批次建 issue view (templates + rows + submit) =====
  * 收: 14 個 view fn + module-level row uid counter + 9 個主 scope handler
  * + toggleIssueDefault (跨 view 給 worklog 端 phrase menu 用)。
@@ -6108,75 +6194,7 @@ const AgentSettings = (() => {
 const IssueBatchEditor = (() => {
   let rowUidCounter = 1;
 
-  let aiSettingsBound = false;
-
   function nextRowUid() { return "br-" + (rowUidCounter++); }
-
-  function renderAISettings() {
-    if (!elements.aiAgentTypeSelect) return;
-
-    // Agent type dropdown（首次 populate）
-    if (!elements.aiAgentTypeSelect.options.length) {
-      elements.aiAgentTypeSelect.innerHTML = Object.entries(AGENT_TYPES)
-        .map(([id, t]) => `<option value="${escapeHtml(id)}">${escapeHtml(t.label)}</option>`)
-        .join("");
-    }
-
-    // Model dropdown（首次 populate）
-    if (!elements.aiModelSelect.options.length) {
-      elements.aiModelSelect.innerHTML = AGENT_MODEL_OPTIONS
-        .map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`)
-        .join("");
-    }
-
-    // API key
-    elements.aiApiKeyInput.value = Store.get("gemini_api_key", "") || "";
-
-    // 當前 agent 的 sysprompt + model
-    const agentId = elements.aiAgentTypeSelect.value || Object.keys(AGENT_TYPES)[0];
-    if (!elements.aiAgentTypeSelect.value) elements.aiAgentTypeSelect.value = agentId;
-    const cfg = AgentSettings.get(agentId);
-    elements.aiSyspromptInput.value = cfg.sysprompt;
-    if (AGENT_MODEL_OPTIONS.includes(cfg.model)) {
-      elements.aiModelSelect.value = cfg.model;
-      elements.aiModelCustomInput.value = "";
-    } else {
-      elements.aiModelSelect.value = AGENT_MODEL_OPTIONS[0];
-      elements.aiModelCustomInput.value = cfg.model;
-    }
-
-    if (!aiSettingsBound) {
-      aiSettingsBound = true;
-      bindAISettings();
-    }
-  }
-
-  function bindAISettings() {
-    elements.aiAgentTypeSelect.addEventListener("change", renderAISettings);
-
-    elements.aiSettingsSave.addEventListener("click", () => {
-      const agentId = elements.aiAgentTypeSelect.value;
-      Store.set("gemini_api_key", elements.aiApiKeyInput.value.trim());
-      const custom = elements.aiModelCustomInput.value.trim();
-      const model = custom || elements.aiModelSelect.value;
-      AgentSettings.save(agentId, {
-        sysprompt: elements.aiSyspromptInput.value,
-        model,
-      });
-      if (elements.aiSettingsStatus) {
-        elements.aiSettingsStatus.textContent = `已儲存（model: ${model}）`;
-      }
-    });
-
-    elements.aiSettingsReset.addEventListener("click", () => {
-      const agentId = elements.aiAgentTypeSelect.value;
-      AgentSettings.reset(agentId);
-      renderAISettings();
-      if (elements.aiSettingsStatus) {
-        elements.aiSettingsStatus.textContent = "已重設為預設";
-      }
-    });
-  }
 
   function makeRow(subject = "", templateId = null) {
     return {
@@ -6275,7 +6293,6 @@ const IssueBatchEditor = (() => {
 
   function render() {
     if (!elements.batchProjectInput) return;
-    renderAISettings();
     renderProjectsDatalist();
     renderTrackerSelect();
     renderTemplatesPicker();

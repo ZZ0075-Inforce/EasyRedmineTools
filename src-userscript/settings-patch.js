@@ -159,6 +159,51 @@ function applySettingsPatches(root) {
     return `<div class="settings-group-hint">本功能尚無可設定的預設值，未來會陸續加入。</div>`;
   }
 
+  // 若該 view 對應有 AI Agent，回傳 collapsible AI section HTML；無則回空字串
+  function renderViewAiSectionHtml(viewKey) {
+    const find = window.__worklog_findAgentForView;
+    const AGENT_TYPES = window.__worklog_AGENT_TYPES;
+    const AGENT_MODEL_OPTIONS = window.__worklog_AGENT_MODEL_OPTIONS;
+    const AgentSettings = window.__worklog_AgentSettings;
+    if (!find || !AGENT_TYPES || !AgentSettings) return "";
+    const agentId = find(viewKey);
+    if (!agentId) return "";
+    const type = AGENT_TYPES[agentId];
+    const cfg = AgentSettings.get(agentId);
+    const inOptions = (AGENT_MODEL_OPTIONS || []).includes(cfg.model);
+    const modelOptions = (AGENT_MODEL_OPTIONS || [])
+      .map((m) => `<option value="${m}" ${m === cfg.model ? "selected" : ""}>${m}</option>`)
+      .join("");
+    const customModel = inOptions ? "" : cfg.model;
+    const safeSysprompt = (cfg.sysprompt || "")
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return `
+      <details class="settings-ai-section" style="margin-top: 24px;">
+        <summary>✨ AI Agent 設定</summary>
+        <div class="field-stack" style="margin-top: 12px;">
+          <span class="muted">Agent: <strong>${type.label}</strong></span>
+          <label class="field-stack" style="margin-top: 12px;">
+            <span>模型</span>
+            <select data-ai-agent-model="${agentId}">${modelOptions}</select>
+          </label>
+          <label class="field-stack" style="margin-top: 12px;">
+            <span>自訂模型 ID（覆寫上方選擇，可留空）</span>
+            <input type="text" data-ai-agent-custom-model="${agentId}" value="${customModel}" placeholder="例如 gemini-2.5-pro 或新發布的 model id">
+          </label>
+          <label class="field-stack" style="margin-top: 12px;">
+            <span>Sysprompt</span>
+            <textarea data-ai-agent-sysprompt="${agentId}" rows="8">${safeSysprompt}</textarea>
+          </label>
+          <div class="ai-settings-actions" style="display:flex; gap:8px; align-items:center; margin-top: 12px;">
+            <button type="button" class="action-button" data-ai-agent-save="${agentId}">儲存</button>
+            <button type="button" class="ghost-button" data-ai-agent-reset="${agentId}">重設為預設</button>
+            <span class="muted" data-ai-agent-status="${agentId}" style="font-size:13px;"></span>
+          </div>
+        </div>
+      </details>
+    `;
+  }
+
   const appearanceTabEl = tabBar.querySelector('[data-settings-tab="appearance"]');
   const appearanceSection = body.querySelector('[data-settings-section="appearance"]');
   let lastTab = appearanceTabEl;
@@ -176,7 +221,7 @@ function applySettingsPatches(root) {
     const sec = document.createElement("section");
     sec.className = "settings-group";
     sec.dataset.settingsSection = v.key;
-    sec.innerHTML = renderViewSectionHtml(v.key);
+    sec.innerHTML = renderViewSectionHtml(v.key) + renderViewAiSectionHtml(v.key);
     lastSection.insertAdjacentElement("afterend", sec);
     lastSection = sec;
   }
@@ -230,6 +275,62 @@ function applySettingsPatches(root) {
       const label = labels[v] || `${v} 天前`;
       if (offsetStatus) offsetStatus.textContent = `已儲存：預設「${label}」（下次開啟生效）`;
     });
+  }
+
+  // ===== AI 助手 tab：Gemini API Key bind =====
+  const aiKeyInput = body.querySelector("#setting-gemini-api-key");
+  const aiKeyStatus = body.querySelector("#setting-gemini-api-key-status");
+  if (aiKeyInput) {
+    aiKeyInput.value = String(Store.get("gemini_api_key", "") || "");
+    const persistAiKey = () => {
+      Store.set("gemini_api_key", aiKeyInput.value.trim());
+      if (aiKeyStatus) {
+        aiKeyStatus.textContent = aiKeyInput.value.trim()
+          ? "已儲存（所有 AI Agent 共用）"
+          : "已清除 API Key";
+      }
+    };
+    aiKeyInput.addEventListener("change", persistAiKey);
+    aiKeyInput.addEventListener("blur", persistAiKey);
+  }
+
+  // ===== Per-view AI Agent section：sysprompt / model bind =====
+  const AgentSettings = window.__worklog_AgentSettings;
+  const AGENT_TYPES = window.__worklog_AGENT_TYPES;
+  if (AgentSettings && AGENT_TYPES) {
+    for (const saveBtn of body.querySelectorAll("[data-ai-agent-save]")) {
+      saveBtn.addEventListener("click", () => {
+        const agentId = saveBtn.dataset.aiAgentSave;
+        const sysprompt = body.querySelector(`[data-ai-agent-sysprompt="${agentId}"]`)?.value || "";
+        const customInput = body.querySelector(`[data-ai-agent-custom-model="${agentId}"]`);
+        const modelSelect = body.querySelector(`[data-ai-agent-model="${agentId}"]`);
+        const custom = customInput ? customInput.value.trim() : "";
+        const model = custom || (modelSelect ? modelSelect.value : "");
+        AgentSettings.save(agentId, { sysprompt, model });
+        const status = body.querySelector(`[data-ai-agent-status="${agentId}"]`);
+        if (status) status.textContent = `已儲存（model: ${model}）`;
+      });
+    }
+    for (const resetBtn of body.querySelectorAll("[data-ai-agent-reset]")) {
+      resetBtn.addEventListener("click", () => {
+        const agentId = resetBtn.dataset.aiAgentReset;
+        AgentSettings.reset(agentId);
+        const cfg = AgentSettings.get(agentId);
+        const sysprompt = body.querySelector(`[data-ai-agent-sysprompt="${agentId}"]`);
+        const customInput = body.querySelector(`[data-ai-agent-custom-model="${agentId}"]`);
+        const modelSelect = body.querySelector(`[data-ai-agent-model="${agentId}"]`);
+        const AGENT_MODEL_OPTIONS = window.__worklog_AGENT_MODEL_OPTIONS || [];
+        if (sysprompt) sysprompt.value = cfg.sysprompt;
+        if (AGENT_MODEL_OPTIONS.includes(cfg.model)) {
+          if (modelSelect) modelSelect.value = cfg.model;
+          if (customInput) customInput.value = "";
+        } else {
+          if (customInput) customInput.value = cfg.model;
+        }
+        const status = body.querySelector(`[data-ai-agent-status="${agentId}"]`);
+        if (status) status.textContent = "已重設為預設";
+      });
+    }
   }
 
   // tab 切換 click 由既有 worklog_app.js 的 [data-settings-tab] querySelectorAll
