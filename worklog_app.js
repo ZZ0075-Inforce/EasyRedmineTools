@@ -154,7 +154,7 @@ const Renders = (() => {
 Renders.subscribe(["phrases"], () => renderTable());
 Renders.subscribe(["phrases"], () => renderPhrasesDrawer());
 Renders.subscribe(["phrases"], () => {
-  if (state.sideView === "inline-tools") renderInlineToolsView();
+  if (state.sideView === "inline-tools") InlineToolsConfig.render();
 });
 
 // 註冊 draftEntries 訂閱（entry table 與 alert-stack 跟 draft 內容直接相關）
@@ -2248,7 +2248,7 @@ function renderAll() {
   renderAlerts();
   renderTable();
   if (state.sideView === "phrases") renderPhrasesDrawer();
-  if (state.sideView === "inline-tools") renderInlineToolsView();
+  if (state.sideView === "inline-tools") InlineToolsConfig.render();
   if (state.sideView === "sources") SavedQueryManager.render();
   if (state.sideView === "issue-batch") renderIssueBatchView();
   renderLoadingMask();
@@ -2326,97 +2326,109 @@ async function deleteIssueTemplateById(id) {
   state.batchSelectedTemplateIds.delete(id);
 }
 
-/* ===== Inline 工具 view（toolbar offsets + 預設工時模板） ================= */
-let __inlineToolsHandlersBound = false;
+/* ===== InlineToolsConfig：Inline 工具 view (toolbar offsets + 預設工時模板) ===
+ * Lazy bind 模式：第一次 render() 時把 3 個輸入元件的 event handler 一次
+ * 綁完 (Store.set + status text)，後續 render() 只 sync DOM value/checked
+ * 不重 bind。bound flag 私有，取代原本的 __inlineToolsHandlersBound module
+ * 全域 var。
+ */
+const InlineToolsConfig = (() => {
+  let bound = false;
 
-function renderInlineToolsView() {
-  if (!elements.inlineToolbarOffsetsInput) return;
+  function render() {
+    if (!elements.inlineToolbarOffsetsInput) return;
 
-  // 0. Enabled toggle：從 Store 載入當前 checked 狀態（每次切到 view 都同步）
-  if (elements.inlineToolbarEnabledToggle) {
-    const enabled = Store.get("inline_toolbar_enabled", true) !== false;
-    elements.inlineToolbarEnabledToggle.checked = enabled;
+    // 0. Enabled toggle：從 Store 載入當前 checked 狀態（每次切到 view 都同步）
+    if (elements.inlineToolbarEnabledToggle) {
+      const enabled = Store.get("inline_toolbar_enabled", true) !== false;
+      elements.inlineToolbarEnabledToggle.checked = enabled;
+    }
+
+    // 1. Toolbar offsets：從 Store 載入
+    let offsets = Store.get("inline_toolbar_offsets", [0, 1, 3]);
+    if (!Array.isArray(offsets)) offsets = [0, 1, 3];
+    elements.inlineToolbarOffsetsInput.value = offsets.join(",");
+
+    // 2. Phrase select：列出 state.phrases，selected based on Store
+    const currentPhraseId = String(Store.get("inline_default_phrase_id", ""));
+    const phrasesHtml = [`<option value="">(無 — 不預填，每次手動填)</option>`]
+      .concat(
+        state.phrases.map((p) => {
+          const label = p.label || `(未命名 - ${p.id.slice(0, 6)})`;
+          const summary = phrasePresetSummary(p);
+          const display = summary ? `${label}  ·  ${summary}` : label;
+          const selected = p.id === currentPhraseId ? " selected" : "";
+          return `<option value="${escapeHtml(p.id)}"${selected}>${escapeHtml(display)}</option>`;
+        })
+      )
+      .join("");
+    elements.inlineDefaultPhraseSelect.innerHTML = phrasesHtml;
+
+    if (!bound) {
+      bound = true;
+      bindHandlers();
+    }
   }
 
-  // 1. Toolbar offsets：從 Store 載入
-  let offsets = Store.get("inline_toolbar_offsets", [0, 1, 3]);
-  if (!Array.isArray(offsets)) offsets = [0, 1, 3];
-  elements.inlineToolbarOffsetsInput.value = offsets.join(",");
+  function bindHandlers() {
+    // Worktime Toolbar toggle: persist + 立即 install/uninstall
+    if (elements.inlineToolbarEnabledToggle) {
+      elements.inlineToolbarEnabledToggle.addEventListener("change", () => {
+        const v = elements.inlineToolbarEnabledToggle.checked;
+        Store.set("inline_toolbar_enabled", v);
+        const status = elements.inlineToolbarEnabledStatus;
+        if (v) {
+          if (typeof window.__worklog_installWorktimeToolbar === "function") {
+            window.__worklog_installWorktimeToolbar();
+          }
+          if (status) status.textContent = "已啟用：當前 issue 頁立即注入；非 issue 頁需切到 issue 頁才會看到";
+        } else {
+          if (typeof window.__worklog_uninstallWorktimeToolbar === "function") {
+            window.__worklog_uninstallWorktimeToolbar();
+          }
+          if (status) status.textContent = "已停用：已移除 toolbar items";
+        }
+      });
+    }
 
-  // 2. Phrase select：列出 state.phrases，selected based on Store
-  const currentPhraseId = String(Store.get("inline_default_phrase_id", ""));
-  const phrasesHtml = [`<option value="">(無 — 不預填，每次手動填)</option>`]
-    .concat(
-      state.phrases.map((p) => {
-        const label = p.label || `(未命名 - ${p.id.slice(0, 6)})`;
-        const summary = phrasePresetSummary(p);
-        const display = summary ? `${label}  ·  ${summary}` : label;
-        const selected = p.id === currentPhraseId ? " selected" : "";
-        return `<option value="${escapeHtml(p.id)}"${selected}>${escapeHtml(display)}</option>`;
-      })
-    )
-    .join("");
-  elements.inlineDefaultPhraseSelect.innerHTML = phrasesHtml;
+    const persistOffsets = () => {
+      const raw = elements.inlineToolbarOffsetsInput.value || "";
+      const parts = raw.split(",")
+        .map((s) => s.trim())
+        .filter((s) => s !== "")
+        .map((s) => Number(s))
+        .filter((n) => Number.isFinite(n) && n >= 0 && n <= 30)
+        .map((n) => Math.floor(n));
+      const deduped = Array.from(new Set(parts));
+      const status = elements.inlineToolbarOffsetsStatus;
+      if (!deduped.length) {
+        if (status) status.textContent = "格式錯誤或全部無效，未儲存（請用 0,1,3 這種格式）";
+        return;
+      }
+      Store.set("inline_toolbar_offsets", deduped);
+      elements.inlineToolbarOffsetsInput.value = deduped.join(",");
+      if (status) status.textContent = `已儲存：[${deduped.join(",")}]（下次重新整理 issue 頁生效）`;
+    };
+    elements.inlineToolbarOffsetsInput.addEventListener("change", persistOffsets);
+    elements.inlineToolbarOffsetsInput.addEventListener("blur", persistOffsets);
 
-  // 3. 綁定 handlers (只綁一次)
-  if (__inlineToolsHandlersBound) return;
-  __inlineToolsHandlersBound = true;
-
-  // Worktime Toolbar toggle: persist + 立即 install/uninstall
-  if (elements.inlineToolbarEnabledToggle) {
-    elements.inlineToolbarEnabledToggle.addEventListener("change", () => {
-      const v = elements.inlineToolbarEnabledToggle.checked;
-      Store.set("inline_toolbar_enabled", v);
-      const status = elements.inlineToolbarEnabledStatus;
+    elements.inlineDefaultPhraseSelect.addEventListener("change", () => {
+      const v = elements.inlineDefaultPhraseSelect.value || "";
+      const status = elements.inlineDefaultPhraseStatus;
       if (v) {
-        if (typeof window.__worklog_installWorktimeToolbar === "function") {
-          window.__worklog_installWorktimeToolbar();
-        }
-        if (status) status.textContent = "已啟用：當前 issue 頁立即注入；非 issue 頁需切到 issue 頁才會看到";
+        Store.set("inline_default_phrase_id", v);
+        const phrase = state.phrases.find((p) => p.id === v);
+        const name = phrase?.label || "(未命名模板)";
+        if (status) status.textContent = `已儲存：預設套用「${name}」（下次開 mini modal 生效）`;
       } else {
-        if (typeof window.__worklog_uninstallWorktimeToolbar === "function") {
-          window.__worklog_uninstallWorktimeToolbar();
-        }
-        if (status) status.textContent = "已停用：已移除 toolbar items";
+        Store.del("inline_default_phrase_id");
+        if (status) status.textContent = "已清除（不預填，每次手動填）";
       }
     });
   }
 
-  const persistOffsets = () => {
-    const raw = elements.inlineToolbarOffsetsInput.value || "";
-    const parts = raw.split(",")
-      .map((s) => s.trim())
-      .filter((s) => s !== "")
-      .map((s) => Number(s))
-      .filter((n) => Number.isFinite(n) && n >= 0 && n <= 30)
-      .map((n) => Math.floor(n));
-    const deduped = Array.from(new Set(parts));
-    const status = elements.inlineToolbarOffsetsStatus;
-    if (!deduped.length) {
-      if (status) status.textContent = "格式錯誤或全部無效，未儲存（請用 0,1,3 這種格式）";
-      return;
-    }
-    Store.set("inline_toolbar_offsets", deduped);
-    elements.inlineToolbarOffsetsInput.value = deduped.join(",");
-    if (status) status.textContent = `已儲存：[${deduped.join(",")}]（下次重新整理 issue 頁生效）`;
-  };
-  elements.inlineToolbarOffsetsInput.addEventListener("change", persistOffsets);
-  elements.inlineToolbarOffsetsInput.addEventListener("blur", persistOffsets);
-
-  elements.inlineDefaultPhraseSelect.addEventListener("change", () => {
-    const v = elements.inlineDefaultPhraseSelect.value || "";
-    const status = elements.inlineDefaultPhraseStatus;
-    if (v) {
-      Store.set("inline_default_phrase_id", v);
-      const phrase = state.phrases.find((p) => p.id === v);
-      const name = phrase?.label || "(未命名模板)";
-      if (status) status.textContent = `已儲存：預設套用「${name}」（下次開 mini modal 生效）`;
-    } else {
-      Store.del("inline_default_phrase_id");
-      if (status) status.textContent = "已清除（不預填，每次手動填）";
-    }
-  });
-}
+  return { render };
+})();
 
 function renderIssueBatchView() {
   if (!elements.batchProjectInput) return;
