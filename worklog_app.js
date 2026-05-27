@@ -1005,6 +1005,41 @@ const AISuggestModal = (() => {
   return { open, close, init };
 })();
 
+/* ===== AIFab：跨 view 浮動 AI 觸發按鈕 ====================================
+ * 公開 sync() / init()。sync() 依當前 state.sideView 用 findAgentForView()
+ * 找對應 agent，有 → enabled + tooltip 帶 agent label；無 → disabled +
+ * tooltip「本功能尚無 AI Agent」。
+ * click → AISuggestModal.open(agentId)。
+ * sync() 在 renderTopTabs() 末尾被呼叫，每次 view 切換都會同步 FAB 狀態。
+ */
+const AIFab = (() => {
+  function sync() {
+    if (!elements.aiFab) return;
+    const agentId = findAgentForView(state.sideView);
+    if (!agentId) {
+      elements.aiFab.disabled = true;
+      elements.aiFab.title = "本功能尚無 AI Agent";
+    } else {
+      elements.aiFab.disabled = false;
+      const type = AGENT_TYPES[agentId];
+      elements.aiFab.title = `✨ ${type.label}（呼叫 Gemini 產建議）`;
+    }
+    elements.aiFab.hidden = false;
+  }
+
+  function init() {
+    if (!elements.aiFab) return;
+    elements.aiFab.addEventListener("click", () => {
+      const agentId = findAgentForView(state.sideView);
+      if (!agentId) return;
+      AISuggestModal.open(agentId);
+    });
+    sync();
+  }
+
+  return { init, sync };
+})();
+
 /* ===== SavedQueryManager：PJ 篩選器 view CRUD =============================
  * 公開 render() / init() 兩個 entry; render() 也兼 list 內 remove 按鈕的
  * inline binding（render → bind 同一輪 click 觸發 remove flow）。
@@ -1194,7 +1229,7 @@ const elements = {
   inlineDefaultPhraseStatus: document.getElementById("inline-default-phrase-status"),
   inlineToolbarEnabledToggle: document.getElementById("inline-toolbar-enabled-toggle"),
   inlineToolbarEnabledStatus: document.getElementById("inline-toolbar-enabled-status"),
-  aiSuggestOpenButton: document.getElementById("ai-suggest-open-button"),
+  aiFab: document.getElementById("ai-fab"),
   aiSuggestModal: document.getElementById("ai-suggest-modal"),
   aiSuggestModalClose: document.getElementById("ai-suggest-modal-close"),
   aiSuggestModalCancel: document.getElementById("ai-suggest-modal-cancel"),
@@ -1686,6 +1721,8 @@ function renderTopTabs() {
   if (mainToolbar) {
     mainToolbar.style.display = sideView === "worklog" ? "" : "none";
   }
+  // 浮動 AI FAB 依當前 view 同步 enabled / tooltip
+  AIFab.sync();
 }
 
 function issueCardHtml(issue, { omitProjectTag = false } = {}) {
@@ -3172,11 +3209,6 @@ const IssueBatchEditor = (() => {
         }
       });
     }
-    if (elements.aiSuggestOpenButton) {
-      elements.aiSuggestOpenButton.addEventListener("click", () => {
-        AISuggestModal.open("batch-issue");
-      });
-    }
     AISuggestModal.init();
   }
 
@@ -3519,6 +3551,7 @@ window.__worklog_applySettingChange = function (key, value) {
 };
 
 applyTheme(loadTheme());
+AIFab.init();
 
 initializeApp().catch((error) => {
   state.issueWarnings = [error.message || String(error)];

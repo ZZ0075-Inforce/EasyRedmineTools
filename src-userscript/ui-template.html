@@ -1654,6 +1654,36 @@
         gap: 8px;
         pointer-events: none;
       }
+
+      /* ─── 浮動 AI FAB（跨 view 固定右下角；依當前 view 啟用/停用） ───── */
+      .ai-fab {
+        position: absolute;
+        right: 24px;
+        bottom: 24px;
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: var(--bg);
+        font-size: 24px;
+        border: 0;
+        box-shadow: 0 6px 18px rgba(0,0,0,0.28);
+        cursor: pointer;
+        z-index: 60;
+        transition: transform 0.15s, opacity 0.15s, box-shadow 0.15s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+      }
+      .ai-fab:hover:not(:disabled) {
+        transform: scale(1.08);
+        box-shadow: 0 8px 22px rgba(0,0,0,0.32);
+      }
+      .ai-fab:active:not(:disabled) { transform: scale(0.96); }
+      .ai-fab:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
+      .ai-fab[hidden] { display: none; }
+      .ai-fab-icon { line-height: 1; }
       .toast {
         background: var(--panel);
         border: 1px solid var(--panel-border);
@@ -1736,6 +1766,9 @@
 
         /* toast 在 mobile 拉滿寬 */
         .toast-container { right: 12px; left: 12px; bottom: 80px; align-items: flex-end; }
+
+        /* FAB 避開底部 mobile-nav tab bar */
+        .ai-fab { right: 16px; bottom: 88px; width: 52px; height: 52px; }
         .toast { max-width: none; width: 100%; }
 
         /* chip action 視覺維持 28×28，::before 把 hit area 擴到 40×40 */
@@ -1982,7 +2015,6 @@
             <div class="batch-row-actions">
               <button class="ghost-button" id="batch-add-blank-row-button">新增空白列</button>
               <button class="ghost-button" id="batch-clear-rows-button">全部清空</button>
-              <button class="ghost-button" id="ai-suggest-open-button" title="呼叫 Gemini Agent 建議 issue">✨ AI 建議</button>
             </div>
             <div class="table-wrap">
               <table class="batch-rows-table" id="batch-rows-table">
@@ -2133,6 +2165,11 @@
 
     <!-- Toast container（短暫操作反饋） -->
     <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="false"></div>
+
+    <!-- 浮動 AI FAB（跨 view 固定右下角；依當前 sideView 啟用/停用） -->
+    <button id="ai-fab" class="ai-fab" type="button" hidden aria-label="AI 助手">
+      <span class="ai-fab-icon">✨</span>
+    </button>
 
     <div id="ai-suggest-modal" class="modal-overlay" hidden aria-hidden="true">
       <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="ai-suggest-modal-title">

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605280006
+// @version      1.0.202605280010
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -252,7 +252,6 @@ const APP_HTML = `<div class="pj-app-shell">
             <div class="pj-batch-row-actions">
               <button class="pj-ghost-button" id="batch-add-blank-row-button">新增空白列</button>
               <button class="pj-ghost-button" id="batch-clear-rows-button">全部清空</button>
-              <button class="pj-ghost-button" id="ai-suggest-open-button" title="呼叫 Gemini Agent 建議 issue">✨ AI 建議</button>
             </div>
             <div class="pj-table-wrap">
               <table class="pj-batch-rows-table" id="pj-batch-rows-table">
@@ -403,6 +402,11 @@ const APP_HTML = `<div class="pj-app-shell">
 
     <!-- Toast container（短暫操作反饋） -->
     <div id="pj-toast-container" class="pj-toast-container" aria-live="polite" aria-atomic="false"></div>
+
+    <!-- 浮動 AI FAB（跨 view 固定右下角；依當前 sideView 啟用/停用） -->
+    <button id="pj-ai-fab" class="pj-ai-fab" type="button" hidden aria-label="AI 助手">
+      <span class="pj-ai-fab-icon">✨</span>
+    </button>
 
     <div id="ai-suggest-modal" class="pj-modal-overlay" hidden aria-hidden="true">
       <div class="pj-modal-box" role="dialog" aria-modal="true" aria-labelledby="ai-suggest-modal-title">
@@ -1582,7 +1586,29 @@ const APP_CSS = `#__worklog_root {
         flex-direction: column;
         gap: 8px;
         pointer-events: none;
-      }#__worklog_root .toast {
+      }#__worklog_root .pj-ai-fab {
+        position: absolute;
+        right: 24px;
+        bottom: 24px;
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: var(--bg);
+        font-size: 24px;
+        border: 0;
+        box-shadow: 0 6px 18px rgba(0,0,0,0.28);
+        cursor: pointer;
+        z-index: 60;
+        transition: transform 0.15s, opacity 0.15s, box-shadow 0.15s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+      }#__worklog_root .pj-ai-fab:hover:not(:disabled) {
+        transform: scale(1.08);
+        box-shadow: 0 8px 22px rgba(0,0,0,0.32);
+      }#__worklog_root .pj-ai-fab:active:not(:disabled) { transform: scale(0.96); }#__worklog_root .pj-ai-fab:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }#__worklog_root .pj-ai-fab[hidden] { display: none; }#__worklog_root .pj-ai-fab-icon { line-height: 1; }#__worklog_root .toast {
         background: var(--panel);
         border: 1px solid var(--panel-border);
         border-left: 4px solid var(--accent);
@@ -1631,7 +1657,7 @@ const APP_CSS = `#__worklog_root {
         }#__worklog_root .pj-app-shell.pj-mobile-open .pj-side-nav { z-index: 30; }#__worklog_root .pj-settings-tabs {
           mask-image: linear-gradient(to right, black 88%, transparent);
           -webkit-mask-image: linear-gradient(to right, black 88%, transparent);
-        }#__worklog_root .pj-toast-container { right: 12px; left: 12px; bottom: 80px; align-items: flex-end; }#__worklog_root .toast { max-width: none; width: 100%; }#__worklog_root .pj-batch-template-chip-action::before {
+        }#__worklog_root .pj-toast-container { right: 12px; left: 12px; bottom: 80px; align-items: flex-end; }#__worklog_root .pj-ai-fab { right: 16px; bottom: 88px; width: 52px; height: 52px; }#__worklog_root .toast { max-width: none; width: 100%; }#__worklog_root .pj-batch-template-chip-action::before {
           content: "";
           position: absolute;
           inset: -6px;
@@ -3587,8 +3613,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605280006";
-const APP_BUILD_TIME = "2026-05-28 00:06";
+const APP_VERSION = "1.0.202605280010";
+const APP_BUILD_TIME = "2026-05-28 00:10";
 
 const state = {
   localToday: localDateString(new Date()),
@@ -4593,6 +4619,41 @@ const AISuggestModal = (() => {
   return { open, close, init };
 })();
 
+/* ===== AIFab：跨 view 浮動 AI 觸發按鈕 ====================================
+ * 公開 sync() / init()。sync() 依當前 state.sideView 用 findAgentForView()
+ * 找對應 agent，有 → enabled + tooltip 帶 agent label；無 → disabled +
+ * tooltip「本功能尚無 AI Agent」。
+ * click → AISuggestModal.open(agentId)。
+ * sync() 在 renderTopTabs() 末尾被呼叫，每次 view 切換都會同步 FAB 狀態。
+ */
+const AIFab = (() => {
+  function sync() {
+    if (!elements.aiFab) return;
+    const agentId = findAgentForView(state.sideView);
+    if (!agentId) {
+      elements.aiFab.disabled = true;
+      elements.aiFab.title = "本功能尚無 AI Agent";
+    } else {
+      elements.aiFab.disabled = false;
+      const type = AGENT_TYPES[agentId];
+      elements.aiFab.title = `✨ ${type.label}（呼叫 Gemini 產建議）`;
+    }
+    elements.aiFab.hidden = false;
+  }
+
+  function init() {
+    if (!elements.aiFab) return;
+    elements.aiFab.addEventListener("click", () => {
+      const agentId = findAgentForView(state.sideView);
+      if (!agentId) return;
+      AISuggestModal.open(agentId);
+    });
+    sync();
+  }
+
+  return { init, sync };
+})();
+
 /* ===== SavedQueryManager：PJ 篩選器 view CRUD =============================
  * 公開 render() / init() 兩個 entry; render() 也兼 list 內 remove 按鈕的
  * inline binding（render → bind 同一輪 click 觸發 remove flow）。
@@ -4782,7 +4843,7 @@ const elements = {
   inlineDefaultPhraseStatus: document.getElementById("inline-default-phrase-status"),
   inlineToolbarEnabledToggle: document.getElementById("inline-toolbar-enabled-toggle"),
   inlineToolbarEnabledStatus: document.getElementById("inline-toolbar-enabled-status"),
-  aiSuggestOpenButton: document.getElementById("ai-suggest-open-button"),
+  aiFab: document.getElementById("pj-ai-fab"),
   aiSuggestModal: document.getElementById("ai-suggest-modal"),
   aiSuggestModalClose: document.getElementById("ai-suggest-modal-close"),
   aiSuggestModalCancel: document.getElementById("ai-suggest-modal-cancel"),
@@ -5263,6 +5324,8 @@ function renderTopTabs() {
   if (mainToolbar) {
     mainToolbar.style.display = sideView === "worklog" ? "" : "none";
   }
+  // 浮動 AI FAB 依當前 view 同步 enabled / tooltip
+  AIFab.sync();
 }
 
 function issueCardHtml(issue, { omitProjectTag = false } = {}) {
@@ -6749,11 +6812,6 @@ const IssueBatchEditor = (() => {
         }
       });
     }
-    if (elements.aiSuggestOpenButton) {
-      elements.aiSuggestOpenButton.addEventListener("click", () => {
-        AISuggestModal.open("batch-issue");
-      });
-    }
     AISuggestModal.init();
   }
 
@@ -7096,6 +7154,7 @@ window.__worklog_applySettingChange = function (key, value) {
 };
 
 applyTheme(loadTheme());
+AIFab.init();
 
 initializeApp().catch((error) => {
   state.issueWarnings = [error.message || String(error)];
