@@ -40,12 +40,18 @@ node -e "new Function(require('fs').readFileSync('dist/worklog.user.js','utf8'))
 | File | Role |
 |------|------|
 | `src-userscript/header.meta.js` | UserScript metadata (@name, @match, @grant, @updateURL) |
-| `src-userscript/runtime.js` | 認證 (session/CSRF + API Key dual-mode)、redmineFetch、preview token + SHA-256 簽章、handler map、訪問記錄 |
-| `src-userscript/menu-injector.js` | 把「⏱ 工時助手」li 注入 Redmine #top-menu-container；定義 `SIDE_VIEWS` 共用陣列 |
+| `src-userscript/runtime.js` | 認證 (session/CSRF + API Key dual-mode)、redmineFetch、Store、訪問記錄、`fetchJsonAdapter` (spread merge 4 個 domain handler module) |
+| `src-userscript/time-entry-preview-session.js` | 兩階段預覽/提交模組：token + SHA-256 簽章 + 30 分鐘 TTL（`create` / `validate` / `consume`）|
+| `src-userscript/time-entry-handlers.js` | `GET /api/time-entry-activities`、`POST /api/time-entries/preview`、`POST /api/time-entries/commit`；內含 `validateEntry` + `__activitiesCache` |
+| `src-userscript/issue-handlers.js` | `GET /api/issues`、`POST /api/issues/batch-create`、`POST /api/schedule/apply-dates` |
+| `src-userscript/catalog-handlers.js` | `GET /api/projects`、`GET /api/trackers` |
+| `src-userscript/storage-handlers.js` | 14 個 GM Store CRUD：phrases / saved-queries / issue-templates / issue-template-defaults |
+| `src-userscript/menu-injector.js` | 把「⏱ 工時助手」li 注入 Redmine #top-menu-container；定義 `SIDE_VIEWS`（含 `inSettings` 欄位）作為 sidebar / menu / 設定 modal 三處共用 |
 | `src-userscript/overlay.js` | overlay 掛載（fixed inset 32px）+ backdrop + ESC 關閉 + sidebar 動態 render |
-| `src-userscript/settings-patch.js` | 設定 modal 注入「連線」tab（API Key 輸入 / 連線測試）+ sidebar 收合切換 |
+| `src-userscript/settings-patch.js` | 設定 modal 注入「連線」tab（API Key 輸入 / 連線測試）+ sidebar 收合切換；`VIEW_TABS = SIDE_VIEWS.filter(v => v.inSettings)` |
+| `src-userscript/inline-injector.js` | 在 Easy Redmine `/issues/{id}` 頁注入 Worktime mini modal（快速填工時 + phrase 套用）；活動 / phrases 都透過 `fetchJsonAdapter` 走 handler map 取資料 |
 | `src-userscript/ui-template.html` | HTML/CSS template，build 工具直接從中抽 body HTML + CSS |
-| `worklog_app.js` | 前端核心邏輯（state、render、event handler）；build 時包進 `__initWorklogApp()` 並用 `window.__worklog_fetchJson` 取代 fetchJson |
+| `worklog_app.js` | 前端核心邏輯（state、render、event handler、`PhraseMenu` / `Renders` / `ScheduleEditor` 三個 IIFE 模組）；build 時包進 `__initWorklogApp()` 並用 sentinel 註解將 `fetchJson` body 替換成 `window.__worklog_fetchJson` 轉接 |
 | `build-userscript.py` | 把上面所有部件組合輸出 `dist/worklog.user.js`；負責 CSS scoping、版號注入、HTML 抽取、JS 改寫 |
 | `dist/worklog.user.js` | 最終產物，commit 進 repo 供 GitHub raw URL 給 Tampermonkey |
 

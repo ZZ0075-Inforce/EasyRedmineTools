@@ -101,18 +101,15 @@ function installWorktimeToolbar() {
 let __currentModalConfirmHandler = null;
 let __currentModalCancelHandler = null;
 let __currentModalPhraseHandler = null;
-let __phrasesCachedForInline = null;
-
 async function fetchPhrasesForInline() {
-  if (__phrasesCachedForInline) return __phrasesCachedForInline;
+  // 走 handler map — storage-handlers.js 從 GM Store 同步讀,
+  // 不需本地 cache（CRUD 之後 inline 看到的就是最新）。
   try {
-    // fetchJsonAdapter 在 runtime.js top-level，inline-injector.js 同層可直接呼叫
     const data = await fetchJsonAdapter("/api/phrases");
-    __phrasesCachedForInline = (data && data.phrases) || [];
+    return (data && data.phrases) || [];
   } catch (err) {
-    __phrasesCachedForInline = [];
+    return [];
   }
-  return __phrasesCachedForInline;
 }
 
 function applyPhraseToInlineModal(modal, phrase) {
@@ -218,24 +215,20 @@ async function openWorktimeMiniModal(issueId, offset) {
   cancelBtn.addEventListener("click", __currentModalCancelHandler);
 }
 
-let __activitiesCachedForInline = null;
 async function populateActivitiesSelect(selectEl) {
-  if (__activitiesCachedForInline) {
-    selectEl.innerHTML = __activitiesCachedForInline;
-    return;
-  }
+  // 走 handler map — TimeEntryHandlers 內部已有 __activitiesCache,
+  // 不需本地 HTML cache。同時可享用 handler 的 fallback path 嘗試
+  // (/enumerations/... → /time_entry_activities.json) 與 manual_entry 偵測。
   try {
-    const data = await redmineFetch("/enumerations/time_entry_activities.json");
-    const activities = (data && data.time_entry_activities) || [];
+    const data = await fetchJsonAdapter("/api/time-entry-activities");
+    const activities = (data && data.activities) || [];
     if (!activities.length) {
       selectEl.innerHTML = `<option value="">(無可用活動)</option>`;
       return;
     }
-    const html = activities
+    selectEl.innerHTML = activities
       .map((a) => `<option value="${a.id}">${escapeForInline(a.name)}</option>`)
       .join("");
-    __activitiesCachedForInline = html;
-    selectEl.innerHTML = html;
   } catch (err) {
     selectEl.innerHTML = `<option value="">(載入失敗)</option>`;
   }
