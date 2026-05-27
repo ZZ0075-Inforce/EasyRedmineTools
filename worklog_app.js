@@ -1833,7 +1833,7 @@ function bindTableEvents() {
       const issueId = Number(event.currentTarget.dataset.issueId);
       PhraseMenu.close();
       try {
-        await toggleIssueDefault(issueId);
+        await IssueBatchEditor.toggleIssueDefault(issueId);
       } catch (err) {
         showToast("操作失敗：" + (err.message || String(err)), { type: "error" });
       }
@@ -2164,37 +2164,6 @@ function applyPhraseFields(fields, entry) {
 }
 
 // Toggle per-issue default：有就刪、沒就用 entry 當下 hours/activity/comments 設定快照。
-async function toggleIssueDefault(issueId) {
-  const existing = state.issueTemplateDefaults[issueId];
-  if (existing) {
-    await fetchJson(`/api/issue-template-defaults/${encodeURIComponent(issueId)}`, { method: "DELETE" });
-    delete state.issueTemplateDefaults[issueId];
-    showToast("已移除此 issue 的 default");
-    return;
-  }
-  const entry = state.draftEntries.find((item) => item.issue_id === issueId);
-  if (!entry) {
-    showToast("找不到對應 entry，無法設 default", { type: "error" });
-    return;
-  }
-  const snap = {
-    hours: entry.hours || "",
-    activity_id: entry.activity_id || "",
-    comments: entry.comments || "",
-  };
-  if (!snap.hours && !snap.activity_id && !snap.comments) {
-    showToast("entry 尚未填值，無法設為 default", { type: "error" });
-    return;
-  }
-  const data = await fetchJson(`/api/issue-template-defaults/${encodeURIComponent(issueId)}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(snap),
-  });
-  state.issueTemplateDefaults[issueId] = data.snapshot || snap;
-  showToast("已設為此 issue 的 default — 下次勾入會自動套用");
-}
-
 function openSettings() {
   state.settingsOpen = true;
   elements.settingsModal.hidden = false;
@@ -2250,80 +2219,13 @@ function renderAll() {
   if (state.sideView === "phrases") renderPhrasesDrawer();
   if (state.sideView === "inline-tools") InlineToolsConfig.render();
   if (state.sideView === "sources") SavedQueryManager.render();
-  if (state.sideView === "issue-batch") renderIssueBatchView();
+  if (state.sideView === "issue-batch") IssueBatchEditor.render();
   renderLoadingMask();
   updateButtons();
   updateDailyTotalBadge();
   updateSettingsTheme();
   persistState();
   PhraseMenu.afterRender();
-}
-
-let __batchRowUidCounter = 1;
-function nextBatchRowUid() { return "br-" + (__batchRowUidCounter++); }
-
-function makeBatchRow(subject = "", templateId = null) {
-  return {
-    uid: nextBatchRowUid(),
-    subject: subject || "",
-    estimated_hours: "",
-    start_date: "",
-    due_date: "",
-    templateId,
-  };
-}
-
-function startEditIssueTemplate(id) {
-  const tpl = state.issueTemplates.find((t) => t.id === id);
-  if (!tpl) return;
-  state.editingIssueTemplateId = id;
-  elements.issueTemplateSubjectInput.value = tpl.subject;
-  elements.issueTemplateAddButton.textContent = "儲存修改";
-  elements.issueTemplateCancelButton.style.display = "";
-  elements.issueTemplateSubjectInput.focus();
-  renderBatchTemplatesPicker();
-}
-
-function resetIssueTemplateForm() {
-  state.editingIssueTemplateId = null;
-  elements.issueTemplateSubjectInput.value = "";
-  elements.issueTemplateAddButton.textContent = "儲存模板";
-  elements.issueTemplateCancelButton.style.display = "none";
-  renderBatchTemplatesPicker();
-}
-
-async function addOrUpdateIssueTemplate() {
-  const subject = elements.issueTemplateSubjectInput.value.trim();
-  if (!subject) {
-    state.issueTemplatesWarnings = ["Subject 不可為空。"];
-    renderBatchAlerts();
-    return;
-  }
-  const editingId = state.editingIssueTemplateId;
-  if (editingId) {
-    const data = await fetchJson(`/api/issue-templates/${encodeURIComponent(editingId)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subject }),
-    });
-    const idx = state.issueTemplates.findIndex((t) => t.id === editingId);
-    if (idx >= 0) state.issueTemplates[idx] = data.template;
-  } else {
-    const data = await fetchJson("/api/issue-templates", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subject }),
-    });
-    state.issueTemplates.push(data.template);
-  }
-  state.issueTemplatesWarnings = [];
-  resetIssueTemplateForm();
-}
-
-async function deleteIssueTemplateById(id) {
-  await fetchJson(`/api/issue-templates/${encodeURIComponent(id)}`, { method: "DELETE" });
-  state.issueTemplates = state.issueTemplates.filter((t) => t.id !== id);
-  state.batchSelectedTemplateIds.delete(id);
 }
 
 /* ===== InlineToolsConfig：Inline 工具 view (toolbar offsets + 預設工時模板) ===
@@ -2430,357 +2332,561 @@ const InlineToolsConfig = (() => {
   return { render };
 })();
 
-function renderIssueBatchView() {
-  if (!elements.batchProjectInput) return;
-  renderBatchProjectsDatalist();
-  renderBatchTrackerSelect();
-  renderBatchTemplatesPicker();
-  renderBatchRowsTable();
-  renderBatchAlerts();
-  renderBatchSummary();
-  renderBatchResults();
-}
+/* ===== IssueBatchEditor：批次建 issue view (templates + rows + submit) =====
+ * 收: 14 個 view fn + module-level row uid counter + 9 個主 scope handler
+ * + toggleIssueDefault (跨 view 給 worklog 端 phrase menu 用)。
+ * 公開 API: render() / init() / toggleIssueDefault(issueId)。
+ */
+const IssueBatchEditor = (() => {
+  let rowUidCounter = 1;
 
-function renderBatchProjectsDatalist() {
-  const dl = elements.batchProjectsDatalist;
-  if (!dl) return;
-  dl.innerHTML = state.projectsList
-    .map((p) => `<option value="${escapeHtml(p.name)}" data-id="${p.id}"></option>`)
-    .join("");
-  if (elements.batchProjectInput.value !== state.batchProjectInputValue) {
-    elements.batchProjectInput.value = state.batchProjectInputValue || "";
-  }
-  syncBatchProjectHint();
-}
+  function nextRowUid() { return "br-" + (rowUidCounter++); }
 
-function syncBatchProjectHint() {
-  const hint = elements.batchProjectHint;
-  if (!hint) return;
-  if (!state.projectsLoaded) {
-    hint.textContent = state.batchPrereqLoading ? "載入專案中…" : "";
-    return;
+  function makeRow(subject = "", templateId = null) {
+    return {
+      uid: nextRowUid(),
+      subject: subject || "",
+      estimated_hours: "",
+      start_date: "",
+      due_date: "",
+      templateId,
+    };
   }
-  const val = (state.batchProjectInputValue || "").trim();
-  if (!val) { hint.textContent = `共 ${state.projectsList.length} 個可選專案`; return; }
-  if (state.batchProjectId) {
-    const p = state.projectsList.find((x) => x.id === state.batchProjectId);
-    hint.textContent = p ? `已選 #${p.id}（${p.identifier}）` : "";
-  } else {
-    hint.textContent = "找不到符合的專案，請從清單挑選";
-  }
-}
 
-function renderBatchTrackerSelect() {
-  const sel = elements.batchTrackerSelect;
-  if (!sel) return;
-  if (!state.trackersLoaded) {
-    sel.innerHTML = `<option value="">${state.batchPrereqLoading ? "載入 tracker 中…" : "（請先載入）"}</option>`;
-    sel.disabled = true;
-    return;
+  function startEditTemplate(id) {
+    const tpl = state.issueTemplates.find((t) => t.id === id);
+    if (!tpl) return;
+    state.editingIssueTemplateId = id;
+    elements.issueTemplateSubjectInput.value = tpl.subject;
+    elements.issueTemplateAddButton.textContent = "儲存修改";
+    elements.issueTemplateCancelButton.style.display = "";
+    elements.issueTemplateSubjectInput.focus();
+    renderTemplatesPicker();
   }
-  sel.disabled = false;
-  const cur = state.batchTrackerId ? String(state.batchTrackerId) : "";
-  const opts = [`<option value="">— 請選擇 —</option>`].concat(
-    state.trackersList.map((t) => `<option value="${t.id}" ${String(t.id) === cur ? "selected" : ""}>${escapeHtml(t.name)}</option>`)
-  );
-  sel.innerHTML = opts.join("");
-}
 
-function updateBatchEditBanner() {
-  const banner = elements.batchEditBanner;
-  if (!banner) return;
-  const editingId = state.editingIssueTemplateId;
-  if (!editingId) {
-    banner.hidden = true;
-    return;
+  function resetTemplateForm() {
+    state.editingIssueTemplateId = null;
+    elements.issueTemplateSubjectInput.value = "";
+    elements.issueTemplateAddButton.textContent = "儲存模板";
+    elements.issueTemplateCancelButton.style.display = "none";
+    renderTemplatesPicker();
   }
-  const tpl = state.issueTemplates.find((t) => t.id === editingId);
-  if (elements.batchEditBannerSubject) {
-    elements.batchEditBannerSubject.textContent = tpl ? tpl.subject : "";
-  }
-  banner.hidden = false;
-}
 
-function renderBatchTemplatesPicker() {
-  const box = elements.batchTemplatesPicker;
-  if (!box) {
-    updateBatchEditBanner();
-    return;
-  }
-  if (!state.issueTemplates.length) {
-    box.innerHTML = `<div class="batch-empty-state">
-      <div>尚未建立 issue 模板</div>
-      <button type="button" class="ghost-button" id="batch-empty-add-cta">+ 新增第一個模板</button>
-      <div class="muted">也可以略過模板，按下方「新增空白列」直接手動加列。</div>
-    </div>`;
-    const cta = box.querySelector("#batch-empty-add-cta");
-    if (cta) {
-      cta.addEventListener("click", () => {
-        if (elements.issueTemplateSubjectInput) elements.issueTemplateSubjectInput.focus();
-      });
+  async function addOrUpdateTemplate() {
+    const subject = elements.issueTemplateSubjectInput.value.trim();
+    if (!subject) {
+      state.issueTemplatesWarnings = ["Subject 不可為空。"];
+      renderAlerts_();
+      return;
     }
-    updateBatchEditBanner();
-    return;
+    const editingId = state.editingIssueTemplateId;
+    if (editingId) {
+      const data = await fetchJson(`/api/issue-templates/${encodeURIComponent(editingId)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject }),
+      });
+      const idx = state.issueTemplates.findIndex((t) => t.id === editingId);
+      if (idx >= 0) state.issueTemplates[idx] = data.template;
+    } else {
+      const data = await fetchJson("/api/issue-templates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject }),
+      });
+      state.issueTemplates.push(data.template);
+    }
+    state.issueTemplatesWarnings = [];
+    resetTemplateForm();
   }
-  const editingId = state.editingIssueTemplateId;
-  box.innerHTML = state.issueTemplates.map((tpl) => {
-    const checked = state.batchSelectedTemplateIds.has(tpl.id);
-    const isEditing = editingId === tpl.id;
-    return `
-      <span class="batch-template-chip ${checked ? "checked" : ""} ${isEditing ? "editing" : ""}" data-tpl-id="${escapeHtml(tpl.id)}">
-        <label class="batch-template-chip-toggle">
-          <input type="checkbox" data-batch-template-toggle="${escapeHtml(tpl.id)}" ${checked ? "checked" : ""}>
-          <span>${escapeHtml(tpl.subject)}</span>
-        </label>
-        <button class="batch-template-chip-action" title="編輯" data-edit-issue-template="${escapeHtml(tpl.id)}">✎</button>
-        <button class="batch-template-chip-action" title="刪除" data-delete-issue-template="${escapeHtml(tpl.id)}">🗑</button>
-      </span>
-    `;
-  }).join("");
 
-  for (const cb of box.querySelectorAll("[data-batch-template-toggle]")) {
-    cb.addEventListener("change", (e) => {
-      const id = e.currentTarget.dataset.batchTemplateToggle;
-      const wasAdded = e.currentTarget.checked;
-      if (wasAdded) {
-        state.batchSelectedTemplateIds.add(id);
-        // 若還沒對應 row 才 push（避免重複勾選 → 重複觸發 → 重複加列）
-        if (!state.batchRows.some((r) => r.templateId === id)) {
-          const tpl = state.issueTemplates.find((t) => t.id === id);
-          if (tpl) state.batchRows.push(makeBatchRow(tpl.subject, id));
-        }
-      } else {
-        state.batchSelectedTemplateIds.delete(id);
-        state.batchRows = state.batchRows.filter((r) => r.templateId !== id);
-      }
-      state.batchWarnings = [];
-      renderBatchTemplatesPicker();
-      renderBatchRowsTable();
-      renderBatchSummary();
-      renderBatchAlerts();
-      // 套用模板加入新列後自動 scroll 到表格，讓使用者知道列已加入
-      if (wasAdded) {
-        requestAnimationFrame(() => {
-          const tbl = document.getElementById("batch-rows-table");
-          if (tbl) tbl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  async function deleteTemplateById(id) {
+    await fetchJson(`/api/issue-templates/${encodeURIComponent(id)}`, { method: "DELETE" });
+    state.issueTemplates = state.issueTemplates.filter((t) => t.id !== id);
+    state.batchSelectedTemplateIds.delete(id);
+  }
+
+  async function toggleIssueDefault(issueId) {
+    const existing = state.issueTemplateDefaults[issueId];
+    if (existing) {
+      await fetchJson(`/api/issue-template-defaults/${encodeURIComponent(issueId)}`, { method: "DELETE" });
+      delete state.issueTemplateDefaults[issueId];
+      showToast("已移除此 issue 的 default");
+      return;
+    }
+    const entry = state.draftEntries.find((item) => item.issue_id === issueId);
+    if (!entry) {
+      showToast("找不到對應 entry，無法設 default", { type: "error" });
+      return;
+    }
+    const snap = {
+      hours: entry.hours || "",
+      activity_id: entry.activity_id || "",
+      comments: entry.comments || "",
+    };
+    if (!snap.hours && !snap.activity_id && !snap.comments) {
+      showToast("entry 尚未填值，無法設為 default", { type: "error" });
+      return;
+    }
+    const data = await fetchJson(`/api/issue-template-defaults/${encodeURIComponent(issueId)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(snap),
+    });
+    state.issueTemplateDefaults[issueId] = data.snapshot || snap;
+    showToast("已設為此 issue 的 default — 下次勾入會自動套用");
+  }
+
+  function render() {
+    if (!elements.batchProjectInput) return;
+    renderProjectsDatalist();
+    renderTrackerSelect();
+    renderTemplatesPicker();
+    renderRowsTable();
+    renderAlerts_();
+    renderSummary();
+    renderResults_();
+  }
+
+  function renderProjectsDatalist() {
+    const dl = elements.batchProjectsDatalist;
+    if (!dl) return;
+    dl.innerHTML = state.projectsList
+      .map((p) => `<option value="${escapeHtml(p.name)}" data-id="${p.id}"></option>`)
+      .join("");
+    if (elements.batchProjectInput.value !== state.batchProjectInputValue) {
+      elements.batchProjectInput.value = state.batchProjectInputValue || "";
+    }
+    syncProjectHint();
+  }
+
+  function syncProjectHint() {
+    const hint = elements.batchProjectHint;
+    if (!hint) return;
+    if (!state.projectsLoaded) {
+      hint.textContent = state.batchPrereqLoading ? "載入專案中…" : "";
+      return;
+    }
+    const val = (state.batchProjectInputValue || "").trim();
+    if (!val) { hint.textContent = `共 ${state.projectsList.length} 個可選專案`; return; }
+    if (state.batchProjectId) {
+      const p = state.projectsList.find((x) => x.id === state.batchProjectId);
+      hint.textContent = p ? `已選 #${p.id}（${p.identifier}）` : "";
+    } else {
+      hint.textContent = "找不到符合的專案，請從清單挑選";
+    }
+  }
+
+  function renderTrackerSelect() {
+    const sel = elements.batchTrackerSelect;
+    if (!sel) return;
+    if (!state.trackersLoaded) {
+      sel.innerHTML = `<option value="">${state.batchPrereqLoading ? "載入 tracker 中…" : "（請先載入）"}</option>`;
+      sel.disabled = true;
+      return;
+    }
+    sel.disabled = false;
+    const cur = state.batchTrackerId ? String(state.batchTrackerId) : "";
+    const opts = [`<option value="">— 請選擇 —</option>`].concat(
+      state.trackersList.map((t) => `<option value="${t.id}" ${String(t.id) === cur ? "selected" : ""}>${escapeHtml(t.name)}</option>`)
+    );
+    sel.innerHTML = opts.join("");
+  }
+
+  function updateEditBanner() {
+    const banner = elements.batchEditBanner;
+    if (!banner) return;
+    const editingId = state.editingIssueTemplateId;
+    if (!editingId) {
+      banner.hidden = true;
+      return;
+    }
+    const tpl = state.issueTemplates.find((t) => t.id === editingId);
+    if (elements.batchEditBannerSubject) {
+      elements.batchEditBannerSubject.textContent = tpl ? tpl.subject : "";
+    }
+    banner.hidden = false;
+  }
+
+  function renderTemplatesPicker() {
+    const box = elements.batchTemplatesPicker;
+    if (!box) {
+      updateEditBanner();
+      return;
+    }
+    if (!state.issueTemplates.length) {
+      box.innerHTML = `<div class="batch-empty-state">
+        <div>尚未建立 issue 模板</div>
+        <button type="button" class="ghost-button" id="batch-empty-add-cta">+ 新增第一個模板</button>
+        <div class="muted">也可以略過模板，按下方「新增空白列」直接手動加列。</div>
+      </div>`;
+      const cta = box.querySelector("#batch-empty-add-cta");
+      if (cta) {
+        cta.addEventListener("click", () => {
+          if (elements.issueTemplateSubjectInput) elements.issueTemplateSubjectInput.focus();
         });
       }
-    });
-  }
-  for (const btn of box.querySelectorAll("[data-edit-issue-template]")) {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      e.preventDefault();
-      startEditIssueTemplate(e.currentTarget.dataset.editIssueTemplate);
-    });
-  }
-  for (const btn of box.querySelectorAll("[data-delete-issue-template]")) {
-    btn.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      e.preventDefault();
-      const tplId = e.currentTarget.dataset.deleteIssueTemplate;
-      const tpl = state.issueTemplates.find((t) => t.id === tplId);
-      const subj = tpl?.subject?.slice(0, 40) || "此模板";
-      const ok = await showConfirmModal({
-        title: "刪除 issue 模板",
-        body: `確定要刪除「${subj}」嗎？\n此操作無法復原。`,
-        confirmText: "刪除",
-        danger: true,
+      updateEditBanner();
+      return;
+    }
+    const editingId = state.editingIssueTemplateId;
+    box.innerHTML = state.issueTemplates.map((tpl) => {
+      const checked = state.batchSelectedTemplateIds.has(tpl.id);
+      const isEditing = editingId === tpl.id;
+      return `
+        <span class="batch-template-chip ${checked ? "checked" : ""} ${isEditing ? "editing" : ""}" data-tpl-id="${escapeHtml(tpl.id)}">
+          <label class="batch-template-chip-toggle">
+            <input type="checkbox" data-batch-template-toggle="${escapeHtml(tpl.id)}" ${checked ? "checked" : ""}>
+            <span>${escapeHtml(tpl.subject)}</span>
+          </label>
+          <button class="batch-template-chip-action" title="編輯" data-edit-issue-template="${escapeHtml(tpl.id)}">✎</button>
+          <button class="batch-template-chip-action" title="刪除" data-delete-issue-template="${escapeHtml(tpl.id)}">🗑</button>
+        </span>
+      `;
+    }).join("");
+
+    for (const cb of box.querySelectorAll("[data-batch-template-toggle]")) {
+      cb.addEventListener("change", (e) => {
+        const id = e.currentTarget.dataset.batchTemplateToggle;
+        const wasAdded = e.currentTarget.checked;
+        if (wasAdded) {
+          state.batchSelectedTemplateIds.add(id);
+          // 若還沒對應 row 才 push（避免重複勾選 → 重複觸發 → 重複加列）
+          if (!state.batchRows.some((r) => r.templateId === id)) {
+            const tpl = state.issueTemplates.find((t) => t.id === id);
+            if (tpl) state.batchRows.push(makeRow(tpl.subject, id));
+          }
+        } else {
+          state.batchSelectedTemplateIds.delete(id);
+          state.batchRows = state.batchRows.filter((r) => r.templateId !== id);
+        }
+        state.batchWarnings = [];
+        renderTemplatesPicker();
+        renderRowsTable();
+        renderSummary();
+        renderAlerts_();
+        // 套用模板加入新列後自動 scroll 到表格，讓使用者知道列已加入
+        if (wasAdded) {
+          requestAnimationFrame(() => {
+            const tbl = document.getElementById("batch-rows-table");
+            if (tbl) tbl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          });
+        }
       });
-      if (!ok) return;
-      try {
-        await withLoading("刪除 issue 模板中...", () => deleteIssueTemplateById(tplId));
-        showToast("已刪除 issue 模板");
-        renderBatchTemplatesPicker();
-      } catch (err) {
-        state.issueTemplatesWarnings = [err.message || String(err)];
-        renderBatchAlerts();
+    }
+    for (const btn of box.querySelectorAll("[data-edit-issue-template]")) {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        startEditTemplate(e.currentTarget.dataset.editIssueTemplate);
+      });
+    }
+    for (const btn of box.querySelectorAll("[data-delete-issue-template]")) {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const tplId = e.currentTarget.dataset.deleteIssueTemplate;
+        const tpl = state.issueTemplates.find((t) => t.id === tplId);
+        const subj = tpl?.subject?.slice(0, 40) || "此模板";
+        const ok = await showConfirmModal({
+          title: "刪除 issue 模板",
+          body: `確定要刪除「${subj}」嗎？\n此操作無法復原。`,
+          confirmText: "刪除",
+          danger: true,
+        });
+        if (!ok) return;
+        try {
+          await withLoading("刪除 issue 模板中...", () => deleteTemplateById(tplId));
+          showToast("已刪除 issue 模板");
+          renderTemplatesPicker();
+        } catch (err) {
+          state.issueTemplatesWarnings = [err.message || String(err)];
+          renderAlerts_();
+        }
+      });
+    }
+    updateEditBanner();
+  }
+
+  function renderRowsTable() {
+    const tbody = elements.batchRowsTbody;
+    if (!tbody) return;
+    if (!state.batchRows.length) {
+      tbody.innerHTML = `<tr><td colspan="5">${emptyStateHtml({
+        icon: "➕",
+        title: "還沒有要建立的 issue",
+        hint: "從上方勾選 issue 模板自動加入列，或按「新增空白列」直接手動加。",
+      })}</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = state.batchRows.map((row) => `
+      <tr data-batch-row-uid="${escapeHtml(row.uid)}">
+        <td class="col-subject"><input type="text" data-batch-row-field="subject" value="${escapeHtml(row.subject)}" placeholder="subject"></td>
+        <td class="col-hours">
+          <div class="hours-stepper">
+            <button type="button" class="stepper-btn" data-batch-row-step="-0.5" data-batch-row-uid="${escapeHtml(row.uid)}" aria-label="減 0.5 小時">−</button>
+            <input class="hours-input" type="number" step="0.5" min="0" max="999" data-batch-row-field="estimated_hours" value="${escapeHtml(row.estimated_hours || "")}" placeholder="0">
+            <button type="button" class="stepper-btn" data-batch-row-step="0.5" data-batch-row-uid="${escapeHtml(row.uid)}" aria-label="加 0.5 小時">＋</button>
+          </div>
+        </td>
+        <td class="col-date"><input type="date" data-batch-row-field="start_date" value="${escapeHtml(row.start_date || "")}"></td>
+        <td class="col-date"><input type="date" data-batch-row-field="due_date" value="${escapeHtml(row.due_date || "")}"></td>
+        <td class="col-remove"><button class="danger-button" data-batch-row-remove="${escapeHtml(row.uid)}">刪除</button></td>
+      </tr>
+    `).join("");
+
+    for (const inp of tbody.querySelectorAll("[data-batch-row-field]")) {
+      inp.addEventListener("input", (e) => {
+        const tr = e.currentTarget.closest("tr");
+        const uid = tr && tr.dataset.batchRowUid;
+        const field = e.currentTarget.dataset.batchRowField;
+        const row = state.batchRows.find((r) => r.uid === uid);
+        if (!row) return;
+        row[field] = e.currentTarget.value;
+        renderSummary();
+      });
+    }
+    for (const btn of tbody.querySelectorAll("[data-batch-row-step]")) {
+      btn.addEventListener("click", (e) => {
+        const uid = e.currentTarget.dataset.batchRowUid;
+        const step = parseFloat(e.currentTarget.dataset.batchRowStep);
+        const row = state.batchRows.find((r) => r.uid === uid);
+        if (!row) return;
+        const current = parseFloat(row.estimated_hours) || 0;
+        let next = Math.max(0, current + step);
+        next = Math.round(next * 10) / 10;
+        row.estimated_hours = next === 0 ? "" : String(next);
+        const tr = e.currentTarget.closest("tr");
+        const input = tr && tr.querySelector('[data-batch-row-field="estimated_hours"]');
+        if (input) input.value = row.estimated_hours;
+        renderSummary();
+      });
+    }
+    for (const btn of tbody.querySelectorAll("[data-batch-row-remove]")) {
+      btn.addEventListener("click", (e) => {
+        const uid = e.currentTarget.dataset.batchRowRemove;
+        const removed = state.batchRows.find((r) => r.uid === uid);
+        state.batchRows = state.batchRows.filter((r) => r.uid !== uid);
+        // 若此 row 是從某 template 來的，連動 uncheck chip
+        if (removed && removed.templateId) {
+          state.batchSelectedTemplateIds.delete(removed.templateId);
+        }
+        renderTemplatesPicker();
+        renderRowsTable();
+        renderSummary();
+      });
+    }
+  }
+
+  function renderAlerts_() {
+    const box = elements.batchAlertStack;
+    if (!box) return;
+    const warns = [
+      ...(state.batchWarnings || []),
+      ...(state.issueTemplatesWarnings || []),
+    ];
+    box.innerHTML = warns.length
+      ? `<div class="alert warn">${warns.map(escapeHtml).join("<br>")}</div>`
+      : "";
+  }
+
+  function renderSummary() {
+    const summary = elements.batchSummary;
+    if (!summary) return;
+    const n = state.batchRows.length;
+    const projectName = (() => {
+      const p = state.projectsList.find((x) => x.id === state.batchProjectId);
+      return p ? p.name : "(未選)";
+    })();
+    const trackerName = (() => {
+      const t = state.trackersList.find((x) => x.id === state.batchTrackerId);
+      return t ? t.name : "(未選)";
+    })();
+    if (!n) {
+      summary.textContent = "尚未加入任何列。";
+      summary.classList.remove("has-rows");
+      summary.classList.add("muted");
+    } else {
+      summary.textContent = `將在「${projectName}」以 tracker「${trackerName}」建立 ${n} 筆 issue。`;
+      summary.classList.add("has-rows");
+      summary.classList.remove("muted");
+    }
+    if (elements.batchCreateButton) {
+      elements.batchCreateButton.textContent = n ? `建立 ${n} 筆 issue` : "建立";
+      elements.batchCreateButton.disabled = !n;
+    }
+  }
+
+  function renderResults_() {
+    const box = elements.batchResultsList;
+    if (!box) return;
+    const results = state.batchResults || [];
+    if (!results.length) { box.innerHTML = ""; return; }
+    const okCount = results.filter((r) => r.ok).length;
+    const failCount = results.length - okCount;
+    const header = `<div class="muted">本次建立結果：✓ ${okCount} 筆成功 / ✗ ${failCount} 筆失敗</div>`;
+    const items = results.map((r) => {
+      if (r.ok) {
+        return `<div class="batch-result-card ok">
+          ✓ <strong>${escapeHtml(r.subject)}</strong>
+          — <a href="${escapeHtml(r.issue_url || ("/issues/" + r.issue_id))}" target="_blank" rel="noopener">#${r.issue_id}</a>
+        </div>`;
       }
-    });
-  }
-  updateBatchEditBanner();
-}
-
-function renderBatchRowsTable() {
-  const tbody = elements.batchRowsTbody;
-  if (!tbody) return;
-  if (!state.batchRows.length) {
-    tbody.innerHTML = `<tr><td colspan="5">${emptyStateHtml({
-      icon: "➕",
-      title: "還沒有要建立的 issue",
-      hint: "從上方勾選 issue 模板自動加入列，或按「新增空白列」直接手動加。",
-    })}</td></tr>`;
-    return;
-  }
-  tbody.innerHTML = state.batchRows.map((row) => `
-    <tr data-batch-row-uid="${escapeHtml(row.uid)}">
-      <td class="col-subject"><input type="text" data-batch-row-field="subject" value="${escapeHtml(row.subject)}" placeholder="subject"></td>
-      <td class="col-hours">
-        <div class="hours-stepper">
-          <button type="button" class="stepper-btn" data-batch-row-step="-0.5" data-batch-row-uid="${escapeHtml(row.uid)}" aria-label="減 0.5 小時">−</button>
-          <input class="hours-input" type="number" step="0.5" min="0" max="999" data-batch-row-field="estimated_hours" value="${escapeHtml(row.estimated_hours || "")}" placeholder="0">
-          <button type="button" class="stepper-btn" data-batch-row-step="0.5" data-batch-row-uid="${escapeHtml(row.uid)}" aria-label="加 0.5 小時">＋</button>
-        </div>
-      </td>
-      <td class="col-date"><input type="date" data-batch-row-field="start_date" value="${escapeHtml(row.start_date || "")}"></td>
-      <td class="col-date"><input type="date" data-batch-row-field="due_date" value="${escapeHtml(row.due_date || "")}"></td>
-      <td class="col-remove"><button class="danger-button" data-batch-row-remove="${escapeHtml(row.uid)}">刪除</button></td>
-    </tr>
-  `).join("");
-
-  for (const inp of tbody.querySelectorAll("[data-batch-row-field]")) {
-    inp.addEventListener("input", (e) => {
-      const tr = e.currentTarget.closest("tr");
-      const uid = tr && tr.dataset.batchRowUid;
-      const field = e.currentTarget.dataset.batchRowField;
-      const row = state.batchRows.find((r) => r.uid === uid);
-      if (!row) return;
-      row[field] = e.currentTarget.value;
-      renderBatchSummary();
-    });
-  }
-  for (const btn of tbody.querySelectorAll("[data-batch-row-step]")) {
-    btn.addEventListener("click", (e) => {
-      const uid = e.currentTarget.dataset.batchRowUid;
-      const step = parseFloat(e.currentTarget.dataset.batchRowStep);
-      const row = state.batchRows.find((r) => r.uid === uid);
-      if (!row) return;
-      const current = parseFloat(row.estimated_hours) || 0;
-      let next = Math.max(0, current + step);
-      next = Math.round(next * 10) / 10;
-      row.estimated_hours = next === 0 ? "" : String(next);
-      const tr = e.currentTarget.closest("tr");
-      const input = tr && tr.querySelector('[data-batch-row-field="estimated_hours"]');
-      if (input) input.value = row.estimated_hours;
-      renderBatchSummary();
-    });
-  }
-  for (const btn of tbody.querySelectorAll("[data-batch-row-remove]")) {
-    btn.addEventListener("click", (e) => {
-      const uid = e.currentTarget.dataset.batchRowRemove;
-      const removed = state.batchRows.find((r) => r.uid === uid);
-      state.batchRows = state.batchRows.filter((r) => r.uid !== uid);
-      // 若此 row 是從某 template 來的，連動 uncheck chip
-      if (removed && removed.templateId) {
-        state.batchSelectedTemplateIds.delete(removed.templateId);
-      }
-      renderBatchTemplatesPicker();
-      renderBatchRowsTable();
-      renderBatchSummary();
-    });
-  }
-}
-
-function renderBatchAlerts() {
-  const box = elements.batchAlertStack;
-  if (!box) return;
-  const warns = [
-    ...(state.batchWarnings || []),
-    ...(state.issueTemplatesWarnings || []),
-  ];
-  box.innerHTML = warns.length
-    ? `<div class="alert warn">${warns.map(escapeHtml).join("<br>")}</div>`
-    : "";
-}
-
-function renderBatchSummary() {
-  const summary = elements.batchSummary;
-  if (!summary) return;
-  const n = state.batchRows.length;
-  const projectName = (() => {
-    const p = state.projectsList.find((x) => x.id === state.batchProjectId);
-    return p ? p.name : "(未選)";
-  })();
-  const trackerName = (() => {
-    const t = state.trackersList.find((x) => x.id === state.batchTrackerId);
-    return t ? t.name : "(未選)";
-  })();
-  if (!n) {
-    summary.textContent = "尚未加入任何列。";
-    summary.classList.remove("has-rows");
-    summary.classList.add("muted");
-  } else {
-    summary.textContent = `將在「${projectName}」以 tracker「${trackerName}」建立 ${n} 筆 issue。`;
-    summary.classList.add("has-rows");
-    summary.classList.remove("muted");
-  }
-  if (elements.batchCreateButton) {
-    elements.batchCreateButton.textContent = n ? `建立 ${n} 筆 issue` : "建立";
-    elements.batchCreateButton.disabled = !n;
-  }
-}
-
-function renderBatchResults() {
-  const box = elements.batchResultsList;
-  if (!box) return;
-  const results = state.batchResults || [];
-  if (!results.length) { box.innerHTML = ""; return; }
-  const okCount = results.filter((r) => r.ok).length;
-  const failCount = results.length - okCount;
-  const header = `<div class="muted">本次建立結果：✓ ${okCount} 筆成功 / ✗ ${failCount} 筆失敗</div>`;
-  const items = results.map((r) => {
-    if (r.ok) {
-      return `<div class="batch-result-card ok">
-        ✓ <strong>${escapeHtml(r.subject)}</strong>
-        — <a href="${escapeHtml(r.issue_url || ("/issues/" + r.issue_id))}" target="_blank" rel="noopener">#${r.issue_id}</a>
+      return `<div class="batch-result-card fail">
+        ✗ <strong>${escapeHtml(r.subject || "(空 subject)")}</strong>
+        — ${escapeHtml(r.error || "未知錯誤")}
       </div>`;
-    }
-    return `<div class="batch-result-card fail">
-      ✗ <strong>${escapeHtml(r.subject || "(空 subject)")}</strong>
-      — ${escapeHtml(r.error || "未知錯誤")}
-    </div>`;
-  }).join("");
-  box.innerHTML = header + items;
-}
+    }).join("");
+    box.innerHTML = header + items;
+  }
 
-async function submitBatchCreate() {
-  state.batchWarnings = [];
-  state.batchResults = [];
-  if (!state.batchProjectId) {
-    state.batchWarnings.push("請選擇 project。");
+  async function submitCreate() {
+    state.batchWarnings = [];
+    state.batchResults = [];
+    if (!state.batchProjectId) {
+      state.batchWarnings.push("請選擇 project。");
+    }
+    if (!state.batchTrackerId) {
+      state.batchWarnings.push("請選擇 tracker。");
+    }
+    if (!state.batchRows.length) {
+      state.batchWarnings.push("請至少加入一筆 issue。");
+    }
+    const emptySubjectCount = state.batchRows.filter((r) => !String(r.subject || "").trim()).length;
+    if (emptySubjectCount) {
+      state.batchWarnings.push(`有 ${emptySubjectCount} 列的 subject 為空，請填寫或刪除。`);
+    }
+    if (state.batchWarnings.length) {
+      renderAlerts_();
+      return;
+    }
+    const payload = {
+      project_id: state.batchProjectId,
+      tracker_id: state.batchTrackerId,
+      rows: state.batchRows.map((r) => ({
+        subject: String(r.subject || "").trim(),
+        estimated_hours: r.estimated_hours,
+        start_date: r.start_date,
+        due_date: r.due_date,
+      })),
+    };
+    const data = await fetchJson("/api/issues/batch-create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    state.batchResults = data.results || [];
+    const successUids = new Set();
+    let okIdx = 0;
+    for (const row of state.batchRows) {
+      const r = state.batchResults[okIdx++];
+      if (r && r.ok) {
+        successUids.add(row.uid);
+        // 成功送出 → 同時取消對應 chip 勾選
+        if (row.templateId) state.batchSelectedTemplateIds.delete(row.templateId);
+      }
+    }
+    state.batchRows = state.batchRows.filter((r) => !successUids.has(r.uid));
   }
-  if (!state.batchTrackerId) {
-    state.batchWarnings.push("請選擇 tracker。");
-  }
-  if (!state.batchRows.length) {
-    state.batchWarnings.push("請至少加入一筆 issue。");
-  }
-  const emptySubjectCount = state.batchRows.filter((r) => !String(r.subject || "").trim()).length;
-  if (emptySubjectCount) {
-    state.batchWarnings.push(`有 ${emptySubjectCount} 列的 subject 為空，請填寫或刪除。`);
-  }
-  if (state.batchWarnings.length) {
-    renderBatchAlerts();
-    return;
-  }
-  const payload = {
-    project_id: state.batchProjectId,
-    tracker_id: state.batchTrackerId,
-    rows: state.batchRows.map((r) => ({
-      subject: String(r.subject || "").trim(),
-      estimated_hours: r.estimated_hours,
-      start_date: r.start_date,
-      due_date: r.due_date,
-    })),
-  };
-  const data = await fetchJson("/api/issues/batch-create", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  state.batchResults = data.results || [];
-  const successUids = new Set();
-  let okIdx = 0;
-  for (const row of state.batchRows) {
-    const r = state.batchResults[okIdx++];
-    if (r && r.ok) {
-      successUids.add(row.uid);
-      // 成功送出 → 同時取消對應 chip 勾選
-      if (row.templateId) state.batchSelectedTemplateIds.delete(row.templateId);
+
+  function init() {
+    if (elements.issueTemplateAddButton) {
+      elements.issueTemplateAddButton.addEventListener("click", async () => {
+        const wasEditing = !!state.editingIssueTemplateId;
+        try {
+          await withLoading("儲存 issue 模板中...", addOrUpdateTemplate);
+          if (!(state.issueTemplatesWarnings && state.issueTemplatesWarnings.length)) {
+            showToast(wasEditing ? "已更新 issue 模板" : "已新增 issue 模板");
+          }
+          renderTemplatesPicker();
+          renderAlerts_();
+        } catch (err) {
+          state.issueTemplatesWarnings = [err.message || String(err)];
+          renderAlerts_();
+        }
+      });
+    }
+    if (elements.issueTemplateCancelButton) {
+      elements.issueTemplateCancelButton.addEventListener("click", resetTemplateForm);
+    }
+    if (elements.batchEditBannerCancel) {
+      elements.batchEditBannerCancel.addEventListener("click", resetTemplateForm);
+    }
+    if (elements.issueTemplateSubjectInput) {
+      elements.issueTemplateSubjectInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          elements.issueTemplateAddButton.click();
+        }
+      });
+    }
+    if (elements.batchProjectInput) {
+      const matchProject = () => {
+        const val = elements.batchProjectInput.value.trim();
+        state.batchProjectInputValue = val;
+        if (!val) { state.batchProjectId = null; syncProjectHint(); return; }
+        const exact = state.projectsList.find((p) => p.name === val);
+        state.batchProjectId = exact ? exact.id : null;
+        syncProjectHint();
+        renderSummary();
+      };
+      elements.batchProjectInput.addEventListener("input", matchProject);
+      elements.batchProjectInput.addEventListener("change", matchProject);
+    }
+    if (elements.batchTrackerSelect) {
+      elements.batchTrackerSelect.addEventListener("change", (e) => {
+        const v = Number(e.target.value);
+        state.batchTrackerId = Number.isFinite(v) && v > 0 ? v : null;
+        renderSummary();
+      });
+    }
+    if (elements.batchAddBlankRowButton) {
+      elements.batchAddBlankRowButton.addEventListener("click", () => {
+        state.batchRows.push(makeRow());
+        state.batchWarnings = [];
+        renderRowsTable();
+        renderSummary();
+        renderAlerts_();
+      });
+    }
+    if (elements.batchClearRowsButton) {
+      elements.batchClearRowsButton.addEventListener("click", async () => {
+        if (!state.batchRows.length) return;
+        const ok = await showConfirmModal({
+          title: "清空所有列",
+          body: `確定要清空目前 ${state.batchRows.length} 列待建 issue？\n此操作無法復原。`,
+          confirmText: "清空",
+          danger: true,
+        });
+        if (!ok) return;
+        state.batchRows = [];
+        state.batchSelectedTemplateIds.clear();
+        state.batchWarnings = [];
+        renderTemplatesPicker();
+        renderRowsTable();
+        renderSummary();
+        renderAlerts_();
+      });
+    }
+    if (elements.batchCreateButton) {
+      elements.batchCreateButton.addEventListener("click", async () => {
+        try {
+          await withLoading("批次建立 issue 中...", submitCreate);
+          renderTemplatesPicker();
+          renderAlerts_();
+          renderRowsTable();
+          renderSummary();
+          renderResults_();
+        } catch (err) {
+          state.batchWarnings = [err.message || String(err)];
+          renderAlerts_();
+        }
+      });
     }
   }
-  state.batchRows = state.batchRows.filter((r) => !successUids.has(r.uid));
-}
+
+  return { render, init, toggleIssueDefault };
+})();
 
 async function previewEntries() {
   if (!state.draftEntries.length) return;
@@ -3099,104 +3205,7 @@ if (elements.scheduleApplyButton) {
 }
 
 
-if (elements.issueTemplateAddButton) {
-  elements.issueTemplateAddButton.addEventListener("click", async () => {
-    const wasEditing = !!state.editingIssueTemplateId;
-    try {
-      await withLoading("儲存 issue 模板中...", addOrUpdateIssueTemplate);
-      if (!(state.issueTemplatesWarnings && state.issueTemplatesWarnings.length)) {
-        showToast(wasEditing ? "已更新 issue 模板" : "已新增 issue 模板");
-      }
-      renderBatchTemplatesPicker();
-      renderBatchAlerts();
-    } catch (err) {
-      state.issueTemplatesWarnings = [err.message || String(err)];
-      renderBatchAlerts();
-    }
-  });
-}
-if (elements.issueTemplateCancelButton) {
-  elements.issueTemplateCancelButton.addEventListener("click", () => {
-    resetIssueTemplateForm();
-  });
-}
-if (elements.batchEditBannerCancel) {
-  elements.batchEditBannerCancel.addEventListener("click", () => {
-    resetIssueTemplateForm();
-  });
-}
-if (elements.issueTemplateSubjectInput) {
-  elements.issueTemplateSubjectInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      elements.issueTemplateAddButton.click();
-    }
-  });
-}
-
-if (elements.batchProjectInput) {
-  const matchProject = () => {
-    const val = elements.batchProjectInput.value.trim();
-    state.batchProjectInputValue = val;
-    if (!val) { state.batchProjectId = null; syncBatchProjectHint(); return; }
-    const exact = state.projectsList.find((p) => p.name === val);
-    state.batchProjectId = exact ? exact.id : null;
-    syncBatchProjectHint();
-    renderBatchSummary();
-  };
-  elements.batchProjectInput.addEventListener("input", matchProject);
-  elements.batchProjectInput.addEventListener("change", matchProject);
-}
-if (elements.batchTrackerSelect) {
-  elements.batchTrackerSelect.addEventListener("change", (e) => {
-    const v = Number(e.target.value);
-    state.batchTrackerId = Number.isFinite(v) && v > 0 ? v : null;
-    renderBatchSummary();
-  });
-}
-if (elements.batchAddBlankRowButton) {
-  elements.batchAddBlankRowButton.addEventListener("click", () => {
-    state.batchRows.push(makeBatchRow());
-    state.batchWarnings = [];
-    renderBatchRowsTable();
-    renderBatchSummary();
-    renderBatchAlerts();
-  });
-}
-if (elements.batchClearRowsButton) {
-  elements.batchClearRowsButton.addEventListener("click", async () => {
-    if (!state.batchRows.length) return;
-    const ok = await showConfirmModal({
-      title: "清空所有列",
-      body: `確定要清空目前 ${state.batchRows.length} 列待建 issue？\n此操作無法復原。`,
-      confirmText: "清空",
-      danger: true,
-    });
-    if (!ok) return;
-    state.batchRows = [];
-    state.batchSelectedTemplateIds.clear();
-    state.batchWarnings = [];
-    renderBatchTemplatesPicker();
-    renderBatchRowsTable();
-    renderBatchSummary();
-    renderBatchAlerts();
-  });
-}
-if (elements.batchCreateButton) {
-  elements.batchCreateButton.addEventListener("click", async () => {
-    try {
-      await withLoading("批次建立 issue 中...", submitBatchCreate);
-      renderBatchTemplatesPicker();
-      renderBatchAlerts();
-      renderBatchRowsTable();
-      renderBatchSummary();
-      renderBatchResults();
-    } catch (err) {
-      state.batchWarnings = [err.message || String(err)];
-      renderBatchAlerts();
-    }
-  });
-}
+IssueBatchEditor.init();
 
 // 給 settings-patch.js 設定即時生效用：worklog tab 改 daily_hour_limit 可立刻反映在 badge / summary
 window.__worklog_applySettingChange = function (key, value) {
