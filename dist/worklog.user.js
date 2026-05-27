@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605280211
+// @version      1.0.202605280314
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -2464,7 +2464,10 @@ const GeminiClient = (() => {
     if (sysprompt && sysprompt.trim()) {
       body.systemInstruction = { parts: [{ text: sysprompt }] };
     }
-    if (responseSchema) {
+    // Gemma 系列對 responseSchema 支援不穩定（schema constraint 反而導致
+    // 損壞 JSON，例 finishReason: STOP 但 text 內混亂碼）。只給 Gemini 系列
+    // 送 responseSchema；Gemma 走 responseMimeType + sysprompt 描述就好。
+    if (responseSchema && !/^gemma-/i.test(modelId)) {
       body.generationConfig.responseSchema = responseSchema;
     }
     const res = await fetch(url, {
@@ -2479,11 +2482,21 @@ const GeminiClient = (() => {
     const data = await res.json();
     const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
     if (!rawText) throw new Error("Gemini 回應內容為空");
-    try {
-      return JSON.parse(rawText);
-    } catch (_) {
-      throw new Error("Gemini 回應不是 JSON：" + rawText.slice(0, 160));
+    // Layer 1: 直接 parse
+    try { return JSON.parse(rawText); } catch (_) {}
+    // Layer 2: 剝 markdown fence 再 parse (` ```json {...} ``` ` 樣式)
+    const stripped = rawText.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
+    try { return JSON.parse(stripped); } catch (_) {}
+    // Layer 3: partial recovery — 從 raw text 用 regex 抽 "subject"
+    const subjects = [...stripped.matchAll(/"subject"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/g)]
+      .map((m) => m[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\"))
+      .filter((s) => s && s.trim());
+    if (subjects.length) {
+      console.warn("[GeminiClient] JSON parse failed, partial recovery extracted",
+        subjects.length, "subjects from raw:", rawText.slice(0, 200));
+      return { issues: subjects.map((s) => ({ subject: s })) };
     }
+    throw new Error("Gemini 回應不是 JSON 也無法 partial recovery：" + rawText.slice(0, 160));
   }
 
   return { generate };
@@ -2521,7 +2534,7 @@ const AGENT_TYPES = {
       "每筆 issue 的 subject 必須以 user 指定的角色縮寫前綴開頭（例：[PG]開發前端 UI），≤80 字、簡潔具體、不重複。\n" +
       "如果能合理推估，再附 estimated_hours（小時，正數）/ start_date / due_date（YYYY-MM-DD）。\n" +
       "rationale 用一句話說明為何建議建這筆 issue（給 user 看的，繁體中文）。",
-    defaultModel: "gemma-4-26b-it",
+    defaultModel: "gemini-2.5-flash",
     outputSchema: {
       type: "object",
       properties: {
@@ -3738,8 +3751,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605280211";
-const APP_BUILD_TIME = "2026-05-28 02:11";
+const APP_VERSION = "1.0.202605280314";
+const APP_BUILD_TIME = "2026-05-28 03:14";
 
 const state = {
   localToday: localDateString(new Date()),
