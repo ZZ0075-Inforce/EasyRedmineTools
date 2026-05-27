@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605271215
+// @version      1.0.202605271303
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -2476,14 +2476,9 @@ function applySettingsPatches(root) {
   });
 
   // ===== 對應每個 sidebar 主功能注入一個 settings tab =====
-  // 順序：外觀 → [worklog/schedule/phrases/sources/issue-batch] → 連線 → 關於
-  const VIEW_TABS = [
-    { key: "worklog",      label: "填寫工時" },
-    { key: "schedule",     label: "兩週排程" },
-    { key: "phrases",      label: "工時模板" },
-    { key: "sources",      label: "PJ 篩選器" },
-    { key: "issue-batch",  label: "批次建 issue" },
-  ];
+  // 順序：外觀 → SIDE_VIEWS filter(inSettings) → 連線 → 關於
+  // 來源：menu-injector.js 的 SIDE_VIEWS（single source of truth）
+  const VIEW_TABS = SIDE_VIEWS.filter((v) => v.inSettings);
 
   function renderViewSectionHtml(key) {
     if (key === "worklog") {
@@ -2853,15 +2848,17 @@ function toggleOverlay() {
 /* ===== 把工時助手入口注入到 Redmine 頂部 menu「問題清單」後面 ============= */
 const MENU_LI_ID = "worklog-helper-menu-item";
 
-/* Single source of truth：sidebar 與頂部 menu 子項共用此陣列。
-   要加新功能項只改這裡，sidebar 跟 menu 都會自動同步。 */
+/* Single source of truth：sidebar / 頂部 menu 子項 / 設定 modal 三處共用此陣列。
+   要加新功能項只改這裡。
+   inSettings: 是否在「設定」modal 出現對應 tab。inline-tools 自己的 view 內有
+   設定（toolbar enabled / default phrase 等），故不在設定 modal 重複露出。 */
 const SIDE_VIEWS = [
-  { key: "worklog",         icon: "📝", iconClass: "icon icon-time",   label: "填寫工時" },
-  { key: "schedule",        icon: "📅", iconClass: "icon icon-stats",  label: "兩週排程" },
-  { key: "phrases",         icon: "✏️", iconClass: "icon icon-edit",   label: "工時模板" },
-  { key: "sources",         icon: "🔍", iconClass: "icon icon-filter", label: "PJ 篩選器" },
-  { key: "issue-batch",     icon: "➕", iconClass: "icon icon-add",    label: "批次建 issue" },
-  { key: "inline-tools",    icon: "⚡", iconClass: "icon icon-settings", label: "Inline 工具" },
+  { key: "worklog",         icon: "📝", iconClass: "icon icon-time",     label: "填寫工時",     inSettings: true  },
+  { key: "schedule",        icon: "📅", iconClass: "icon icon-stats",    label: "兩週排程",     inSettings: true  },
+  { key: "phrases",         icon: "✏️", iconClass: "icon icon-edit",     label: "工時模板",     inSettings: true  },
+  { key: "sources",         icon: "🔍", iconClass: "icon icon-filter",   label: "PJ 篩選器",    inSettings: true  },
+  { key: "issue-batch",     icon: "➕", iconClass: "icon icon-add",      label: "批次建 issue", inSettings: true  },
+  { key: "inline-tools",    icon: "⚡", iconClass: "icon icon-settings", label: "Inline 工具",  inSettings: false },
 ];
 window.__worklog_SIDE_VIEWS = SIDE_VIEWS;
 
@@ -3366,8 +3363,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605271215";
-const APP_BUILD_TIME = "2026-05-27 12:15";
+const APP_VERSION = "1.0.202605271303";
+const APP_BUILD_TIME = "2026-05-27 13:03";
 
 const state = {
   localToday: localDateString(new Date()),

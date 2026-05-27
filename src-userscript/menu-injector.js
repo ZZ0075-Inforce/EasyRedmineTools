@@ -1,15 +1,17 @@
 /* ===== 把工時助手入口注入到 Redmine 頂部 menu「問題清單」後面 ============= */
 const MENU_LI_ID = "worklog-helper-menu-item";
 
-/* Single source of truth：sidebar 與頂部 menu 子項共用此陣列。
-   要加新功能項只改這裡，sidebar 跟 menu 都會自動同步。 */
+/* Single source of truth：sidebar / 頂部 menu 子項 / 設定 modal 三處共用此陣列。
+   要加新功能項只改這裡。
+   inSettings: 是否在「設定」modal 出現對應 tab。inline-tools 自己的 view 內有
+   設定（toolbar enabled / default phrase 等），故不在設定 modal 重複露出。 */
 const SIDE_VIEWS = [
-  { key: "worklog",         icon: "📝", iconClass: "icon icon-time",   label: "填寫工時" },
-  { key: "schedule",        icon: "📅", iconClass: "icon icon-stats",  label: "兩週排程" },
-  { key: "phrases",         icon: "✏️", iconClass: "icon icon-edit",   label: "工時模板" },
-  { key: "sources",         icon: "🔍", iconClass: "icon icon-filter", label: "PJ 篩選器" },
-  { key: "issue-batch",     icon: "➕", iconClass: "icon icon-add",    label: "批次建 issue" },
-  { key: "inline-tools",    icon: "⚡", iconClass: "icon icon-settings", label: "Inline 工具" },
+  { key: "worklog",         icon: "📝", iconClass: "icon icon-time",     label: "填寫工時",     inSettings: true  },
+  { key: "schedule",        icon: "📅", iconClass: "icon icon-stats",    label: "兩週排程",     inSettings: true  },
+  { key: "phrases",         icon: "✏️", iconClass: "icon icon-edit",     label: "工時模板",     inSettings: true  },
+  { key: "sources",         icon: "🔍", iconClass: "icon icon-filter",   label: "PJ 篩選器",    inSettings: true  },
+  { key: "issue-batch",     icon: "➕", iconClass: "icon icon-add",      label: "批次建 issue", inSettings: true  },
+  { key: "inline-tools",    icon: "⚡", iconClass: "icon icon-settings", label: "Inline 工具",  inSettings: false },
 ];
 window.__worklog_SIDE_VIEWS = SIDE_VIEWS;
 

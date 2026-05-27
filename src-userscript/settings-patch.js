@@ -115,14 +115,9 @@ function applySettingsPatches(root) {
   });
 
   // ===== 對應每個 sidebar 主功能注入一個 settings tab =====
-  // 順序：外觀 → [worklog/schedule/phrases/sources/issue-batch] → 連線 → 關於
-  const VIEW_TABS = [
-    { key: "worklog",      label: "填寫工時" },
-    { key: "schedule",     label: "兩週排程" },
-    { key: "phrases",      label: "工時模板" },
-    { key: "sources",      label: "PJ 篩選器" },
-    { key: "issue-batch",  label: "批次建 issue" },
-  ];
+  // 順序：外觀 → SIDE_VIEWS filter(inSettings) → 連線 → 關於
+  // 來源：menu-injector.js 的 SIDE_VIEWS（single source of truth）
+  const VIEW_TABS = SIDE_VIEWS.filter((v) => v.inSettings);
 
   function renderViewSectionHtml(key) {
     if (key === "worklog") {
