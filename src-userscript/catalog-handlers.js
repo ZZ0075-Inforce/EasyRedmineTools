@@ -1,28 +1,27 @@
 /* ===== Catalog handlers：projects / trackers 列表查詢 ====================== */
 
 const CatalogHandlers = {
-  async "GET /api/projects"() {
-    // Redmine /projects.json 預設只回 25 筆，分頁聚合所有可見專案
-    const limit = 100;
-    let offset = 0;
-    const all = [];
-    while (true) {
-      const data = await redmineFetch(`/projects.json?limit=${limit}&offset=${offset}`);
-      const list = Array.isArray(data.projects) ? data.projects : [];
-      for (const p of list) {
-        if (p && p.id) all.push({
-          id: Number(p.id),
-          name: String(p.name || "").trim(),
-          identifier: String(p.identifier || ""),
-        });
-      }
-      const total = Number(data.total_count || 0);
-      offset += list.length;
-      if (!list.length || offset >= total) break;
-      if (offset > 2000) break;  // 安全閥
+  async "GET /api/projects"(params) {
+    // 單頁 forward (client side 自己 offset loop，方便漸進渲染)
+    // Redmine /projects.json 預設只回 25 筆，limit 上限 100。
+    const offset = Number(params.get("offset")) || 0;
+    const limit = Math.min(Number(params.get("limit")) || 100, 100);
+    const data = await redmineFetch(`/projects.json?limit=${limit}&offset=${offset}`);
+    const list = Array.isArray(data.projects) ? data.projects : [];
+    const projects = [];
+    for (const p of list) {
+      if (p && p.id) projects.push({
+        id: Number(p.id),
+        name: String(p.name || "").trim(),
+        identifier: String(p.identifier || ""),
+      });
     }
-    all.sort((a, b) => a.name.localeCompare(b.name, "zh-Hant"));
-    return { projects: all };
+    return {
+      projects,
+      total_count: Number(data.total_count || projects.length),
+      offset,
+      limit,
+    };
   },
 
   async "GET /api/trackers"() {

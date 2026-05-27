@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605271802
+// @version      1.0.202605272143
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -1941,28 +1941,27 @@ const IssueHandlers = {
 /* ===== Catalog handlers：projects / trackers 列表查詢 ====================== */
 
 const CatalogHandlers = {
-  async "GET /api/projects"() {
-    // Redmine /projects.json 預設只回 25 筆，分頁聚合所有可見專案
-    const limit = 100;
-    let offset = 0;
-    const all = [];
-    while (true) {
-      const data = await redmineFetch(`/projects.json?limit=${limit}&offset=${offset}`);
-      const list = Array.isArray(data.projects) ? data.projects : [];
-      for (const p of list) {
-        if (p && p.id) all.push({
-          id: Number(p.id),
-          name: String(p.name || "").trim(),
-          identifier: String(p.identifier || ""),
-        });
-      }
-      const total = Number(data.total_count || 0);
-      offset += list.length;
-      if (!list.length || offset >= total) break;
-      if (offset > 2000) break;  // 安全閥
+  async "GET /api/projects"(params) {
+    // 單頁 forward (client side 自己 offset loop，方便漸進渲染)
+    // Redmine /projects.json 預設只回 25 筆，limit 上限 100。
+    const offset = Number(params.get("offset")) || 0;
+    const limit = Math.min(Number(params.get("limit")) || 100, 100);
+    const data = await redmineFetch(`/projects.json?limit=${limit}&offset=${offset}`);
+    const list = Array.isArray(data.projects) ? data.projects : [];
+    const projects = [];
+    for (const p of list) {
+      if (p && p.id) projects.push({
+        id: Number(p.id),
+        name: String(p.name || "").trim(),
+        identifier: String(p.identifier || ""),
+      });
     }
-    all.sort((a, b) => a.name.localeCompare(b.name, "zh-Hant"));
-    return { projects: all };
+    return {
+      projects,
+      total_count: Number(data.total_count || projects.length),
+      offset,
+      limit,
+    };
   },
 
   async "GET /api/trackers"() {
@@ -3398,8 +3397,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605271802";
-const APP_BUILD_TIME = "2026-05-27 18:02";
+const APP_VERSION = "1.0.202605272143";
+const APP_BUILD_TIME = "2026-05-27 21:43";
 
 const state = {
   localToday: localDateString(new Date()),
@@ -3413,6 +3412,7 @@ const state = {
   issueTemplatesWarnings: [],
   projectsList: [],
   projectsLoaded: false,
+  projectsTotalCount: 0,
   trackersList: [],
   trackersLoaded: false,
   batchProjectId: null,
@@ -4769,8 +4769,24 @@ async function fetchIssueTemplateDefaults() {
 }
 
 async function fetchProjects() {
-  const data = await fetchJson("/api/projects");
-  state.projectsList = data.projects || [];
+  // 漸進拉：每 batch 拉到後 push 進 state.projectsList 並觸發 batch view 局部刷新
+  state.projectsList = [];
+  state.projectsTotalCount = 0;
+  let offset = 0;
+  const limit = 100;
+  while (true) {
+    const data = await fetchJson(`/api/projects?offset=${offset}&limit=${limit}`);
+    const batch = data.projects || [];
+    state.projectsList.push(...batch);
+    state.projectsTotalCount = Number(data.total_count ?? state.projectsList.length);
+    if (state.sideView === "issue-batch") {
+      IssueBatchEditor.syncProjectProgress();
+    }
+    offset += batch.length;
+    if (!batch.length || offset >= state.projectsTotalCount) break;
+    if (offset > 2000) break;  // 安全閥
+  }
+  state.projectsList.sort((a, b) => a.name.localeCompare(b.name, "zh-Hant"));
   state.projectsLoaded = true;
 }
 
@@ -5852,7 +5868,15 @@ const IssueBatchEditor = (() => {
     const hint = elements.batchProjectHint;
     if (!hint) return;
     if (!state.projectsLoaded) {
-      hint.textContent = state.batchPrereqLoading ? "載入專案中…" : "";
+      if (state.batchPrereqLoading) {
+        const loaded = state.projectsList.length;
+        const total = state.projectsTotalCount;
+        hint.textContent = total > 0
+          ? `載入專案 ${loaded} / ${total}…`
+          : "載入專案中…";
+      } else {
+        hint.textContent = "";
+      }
       return;
     }
     const val = (state.batchProjectInputValue || "").trim();
@@ -5863,6 +5887,10 @@ const IssueBatchEditor = (() => {
     } else {
       hint.textContent = "找不到符合的專案，請從清單挑選";
     }
+  }
+
+  function syncProjectProgress() {
+    renderProjectsDatalist();  // 自己已呼叫 syncProjectHint
   }
 
   function renderTrackerSelect() {
@@ -6273,7 +6301,7 @@ const IssueBatchEditor = (() => {
     }
   }
 
-  return { render, init, toggleIssueDefault };
+  return { render, init, toggleIssueDefault, syncProjectProgress };
 })();
 
 async function previewEntries() {
@@ -6472,14 +6500,17 @@ for (const btn of document.querySelectorAll("[data-side-view]")) {
       } else if (target === "worklog" && isSchedule) {
         await switchSource({ type: "mine" });
       } else if (target === "issue-batch") {
+        // 進 view 立即 render（Templates / Rows 區可動）；prereq 背景拉、
+        // 每 batch 完成漸進刷新 Project / Tracker 區。
         renderAll();
         if (!state.projectsLoaded || !state.trackersLoaded) {
-          try {
-            await withLoading("載入專案 / tracker 中...", loadBatchPrerequisites);
-          } catch (e) {
-            state.batchWarnings = ["載入專案 / tracker 失敗：" + (e.message || String(e))];
-          }
-          renderAll();
+          loadBatchPrerequisites()
+            .catch((e) => {
+              state.batchWarnings = ["載入專案 / tracker 失敗：" + (e.message || String(e))];
+            })
+            .finally(() => {
+              if (state.sideView === "issue-batch") IssueBatchEditor.render();
+            });
         }
       } else {
         // phrases / sources / issue-templates 純 view 切換，不動 source
