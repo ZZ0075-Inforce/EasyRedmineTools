@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605270950
+// @version      1.0.202605271215
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -3366,8 +3366,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605270950";
-const APP_BUILD_TIME = "2026-05-27 09:50";
+const APP_VERSION = "1.0.202605271215";
+const APP_BUILD_TIME = "2026-05-27 12:15";
 
 const state = {
   localToday: localDateString(new Date()),
@@ -3411,15 +3411,8 @@ const state = {
   isLoading: false,
   loadingMessage: "",
   expandedProjects: new Set(),
-  scheduleStage: "select",
-  scheduleSelectedProjectIds: new Set(),
-  scheduleProjectOrder: [],
-  scheduleIssueOrder: {},
-  scheduleBudgets: {},
-  budgetEditIssueId: null,
   dailyHourLimit: 6.5,
   theme: "light",
-  scheduleCommitResults: [],
 };
 
 /* ===== PhraseMenu Controller ============================================ */
@@ -3540,7 +3533,621 @@ Renders.setCrossCutting(() => {
   PhraseMenu.afterRender();
 });
 
-let dragContext = null;
+/* ===== ScheduleEditor：兩週排程 view 集中地 ============================== */
+// 收進來: 7 state slice + dragContext + 19 schedule fns + applyScheduleDates。
+// 範圍備註: 此 deepening 只搬內聚 (B2)，schedule UI 仍透過 worklog 的
+// pj-issue-list / pj-table-wrap 容器渲染 (visibleView hack 留給未來 session)。
+const ScheduleEditor = (() => {
+  // 私有 state（取代原 state.schedule* / state.budgetEditIssueId / 全域 dragContext）
+  let stage = "select";                            // "select" | "arrange"
+  const selectedProjectIds = new Set();
+  let projectOrder = [];
+  let issueOrder = {};                             // { [pid]: issueIds[] }
+  let budgets = {};                                // { [iid]: hours }
+  let budgetEditIssueId = null;
+  let commitResults = [];
+  let dragContext = null;                          // { kind, projectId, issueId }
+
+  function workingDays(minCount = 10, baseDateStr) {
+    let start;
+    if (baseDateStr) {
+      const [y, m, d] = baseDateStr.split("-").map(Number);
+      start = new Date(y, (m || 1) - 1, d || 1);
+    } else {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const dow = today.getDay();
+      const daysFromMonday = dow === 0 ? 6 : dow - 1;
+      start = new Date(today);
+      start.setDate(today.getDate() - daysFromMonday);
+    }
+    const days = [];
+    const cursor = new Date(start);
+    const cap = 365;
+    while (days.length < minCount) {
+      const wd = cursor.getDay();
+      if (wd >= 1 && wd <= 5) days.push(localDateString(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+      if (days.length >= cap) break;
+    }
+    return days;
+  }
+
+  function getIssueBudget(issue) {
+    const override = budgets[issue.issue_id];
+    if (override !== undefined && override !== null && override !== "") {
+      const n = Number(override);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    }
+    const est = Number(issue.estimated_hours) || 0;
+    const spent = Number(issue.spent_hours) || 0;
+    return Math.max(est - spent, 0);
+  }
+
+  function collectAllProjects() {
+    const map = new Map();
+    for (const issue of state.issues) {
+      const pid = issue.project_id || 0;
+      if (!map.has(pid)) {
+        map.set(pid, { id: pid, name: issue.project || "(未指定)", issueIds: [], totalBudget: 0 });
+      }
+      const entry = map.get(pid);
+      entry.issueIds.push(issue.issue_id);
+      const est = Number(issue.estimated_hours) || 0;
+      const spent = Number(issue.spent_hours) || 0;
+      entry.totalBudget += Math.max(est - spent, 0);
+    }
+    return map;
+  }
+
+  function ensureScheduleOrder() {
+    const projectMap = new Map();
+    for (const issue of state.issues) {
+      const pid = issue.project_id || 0;
+      if (!selectedProjectIds.has(pid)) continue;
+      if (!projectMap.has(pid)) {
+        projectMap.set(pid, { id: pid, name: issue.project || "(未指定)", issueIds: [] });
+      }
+      projectMap.get(pid).issueIds.push(issue.issue_id);
+    }
+    const currentPids = new Set(projectMap.keys());
+    projectOrder = projectOrder.filter((pid) => currentPids.has(pid));
+    for (const pid of currentPids) {
+      if (!projectOrder.includes(pid)) projectOrder.push(pid);
+    }
+    for (const pid of currentPids) {
+      const currentIids = new Set(projectMap.get(pid).issueIds);
+      const existing = issueOrder[pid] || [];
+      const cleaned = existing.filter((iid) => currentIids.has(iid));
+      for (const iid of projectMap.get(pid).issueIds) {
+        if (!cleaned.includes(iid)) cleaned.push(iid);
+      }
+      issueOrder[pid] = cleaned;
+    }
+    return projectMap;
+  }
+
+  function computeSchedule() {
+    ensureScheduleOrder();
+    const limit = state.dailyHourLimit;
+    let totalDemand = 0;
+    for (const pid of projectOrder) {
+      const order = issueOrder[pid] || [];
+      for (const iid of order) {
+        const issue = state.issues.find((i) => i.issue_id === iid);
+        if (!issue) continue;
+        totalDemand += getIssueBudget(issue);
+      }
+    }
+    const daysNeeded = Math.max(10, Math.ceil(totalDemand / limit) + 1);
+    const days = workingDays(daysNeeded, state.batchSpentOn);
+    const budgetsLeft = days.map(() => limit);
+    const allocations = days.map(() => []);
+    for (const pid of projectOrder) {
+      const order = issueOrder[pid] || [];
+      for (const iid of order) {
+        const issue = state.issues.find((i) => i.issue_id === iid);
+        if (!issue) continue;
+        const total = getIssueBudget(issue);
+        if (total <= 0) continue;
+        let remaining = total;
+        for (let di = 0; di < days.length && remaining > 0.01; di++) {
+          const slot = Math.min(remaining, budgetsLeft[di]);
+          if (slot > 0.01) {
+            allocations[di].push({
+              issue_id: iid,
+              subject: issue.subject || "",
+              project: issue.project || "",
+              hours: +slot.toFixed(2),
+            });
+            budgetsLeft[di] = +(budgetsLeft[di] - slot).toFixed(2);
+            remaining = +(remaining - slot).toFixed(2);
+          }
+        }
+      }
+    }
+    return { days, allocations, budgetsLeft, limit };
+  }
+
+  function deriveIssueDatesFromSchedule(schedule) {
+    const map = new Map();
+    for (let i = 0; i < schedule.days.length; i++) {
+      const date = schedule.days[i];
+      for (const item of schedule.allocations[i]) {
+        const existing = map.get(item.issue_id);
+        if (!existing) {
+          map.set(item.issue_id, {
+            issue_id: item.issue_id,
+            subject: item.subject,
+            start_date: date,
+            due_date: date,
+          });
+        } else {
+          existing.due_date = date;
+        }
+      }
+    }
+    return Array.from(map.values());
+  }
+
+  function renderBudgetCell(issue) {
+    const iid = issue.issue_id;
+    const override = budgets[iid];
+    const est = Number(issue.estimated_hours) || 0;
+    const spent = Number(issue.spent_hours) || 0;
+    const remaining = Math.max(est - spent, 0);
+    const hasOverride = override !== undefined && override !== null && override !== "";
+    const displayValue = hasOverride ? Number(override) : remaining;
+    const isEditing = budgetEditIssueId === iid;
+    if (isEditing) {
+      return `<input type="number" step="0.5" min="0" class="pj-budget-input" data-budget-input="${iid}" value="${escapeHtml(String(displayValue))}">`;
+    }
+    return `
+      <button class="pj-budget-badge ${hasOverride ? "override" : ""}" data-budget-toggle="${iid}" title="點擊編輯預算 (est ${est}h · spent ${spent}h)">
+        ${displayValue}h${hasOverride ? ` <span class="pj-clear-override" data-budget-clear="${iid}" title="清除覆寫">⟲</span>` : ""}
+      </button>
+    `;
+  }
+
+  function renderSelectStage() {
+    const projectMap = collectAllProjects();
+    const projects = Array.from(projectMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+    if (!projects.length) {
+      elements.issueList.innerHTML = `<li>${emptyStateHtml({
+        icon: "📅",
+        title: "沒有可排程的 project",
+        hint: "先確認「我的 issue」分頁有資料（自己被指派的進行中 issue）。",
+      })}</li>`;
+      return;
+    }
+    elements.issueList.innerHTML = `
+      <li class="pj-sched-breadcrumb muted">Step 1 / 2 · 勾選要排程的 project</li>
+      ${projects
+        .map((proj) => {
+          const selected = selectedProjectIds.has(proj.id);
+          return `
+            <li>
+              <label class="pj-sched-select-card ${selected ? "selected" : ""}">
+                <input type="checkbox" ${selected ? "checked" : ""} data-select-project="${proj.id}">
+                <span class="pj-sched-select-main">
+                  <h3 class="pj-sched-select-title">${escapeHtml(proj.name)}</h3>
+                  <div class="pj-sched-select-meta">${proj.issueIds.length} issues · 預估剩 ${proj.totalBudget.toFixed(1)}h</div>
+                </span>
+              </label>
+            </li>
+          `;
+        })
+        .join("")}
+    `;
+    for (const input of elements.issueList.querySelectorAll("[data-select-project]")) {
+      input.addEventListener("change", (event) => {
+        const pid = Number(event.currentTarget.dataset.selectProject);
+        if (event.currentTarget.checked) selectedProjectIds.add(pid);
+        else selectedProjectIds.delete(pid);
+        renderAll();
+      });
+    }
+  }
+
+  function renderOrderingList() {
+    const projectMap = ensureScheduleOrder();
+    if (!projectOrder.length) {
+      elements.issueList.innerHTML = `
+        <li class="pj-sched-breadcrumb">
+          <button class="pj-ghost-button tiny" id="sched-back-button">← 重新選 project</button>
+        </li>
+        <li>${emptyStateHtml({
+          icon: "📅",
+          title: "沒有已勾選的 project",
+          hint: "請回到 Step 1 重新選擇要排程的 project。",
+        })}</li>
+      `;
+      document.getElementById("sched-back-button")?.addEventListener("click", () => {
+        stage = "select";
+        renderAll();
+      });
+      return;
+    }
+    const parts = projectOrder.map((pid, pi) => {
+      const project = projectMap.get(pid);
+      if (!project) return "";
+      const isFirstProject = pi === 0;
+      const isLastProject = pi === projectOrder.length - 1;
+      const issueIds = issueOrder[pid] || [];
+      const issueBlocks = issueIds
+        .map((iid, ii) => {
+          const issue = state.issues.find((i) => i.issue_id === iid);
+          if (!issue) return "";
+          const isFirst = ii === 0;
+          const isLast = ii === issueIds.length - 1;
+          return `
+            <div class="pj-sched-issue" draggable="true" data-issue-drag="${pid}:${iid}">
+              <div class="pj-sched-issue-line">
+                <button class="pj-ghost-button tiny" ${isFirst ? "disabled" : ""} data-move-issue-up="${pid}:${iid}">↑</button>
+                <button class="pj-ghost-button tiny" ${isLast ? "disabled" : ""} data-move-issue-down="${pid}:${iid}">↓</button>
+                <span class="pj-issue-id">#${iid}</span>
+                <span class="pj-issue-title">${escapeHtml(issue.subject || "")}</span>
+                ${renderBudgetCell(issue)}
+              </div>
+            </div>
+          `;
+        })
+        .join("");
+      return `
+        <li class="pj-sched-project" draggable="true" data-project-drag-id="${pid}">
+          <div class="pj-sched-project-head">
+            <button class="pj-ghost-button tiny" ${isFirstProject ? "disabled" : ""} data-move-project-up="${pid}">↑</button>
+            <button class="pj-ghost-button tiny" ${isLastProject ? "disabled" : ""} data-move-project-down="${pid}">↓</button>
+            <strong>${escapeHtml(project.name)}</strong>
+            <span class="muted">(${project.issueIds.length} issues)</span>
+          </div>
+          ${issueBlocks}
+        </li>
+      `;
+    });
+    elements.issueList.innerHTML = `
+      <li class="pj-sched-breadcrumb">
+        <button class="pj-ghost-button tiny" id="sched-back-button">← 重新選 project</button>
+        <span class="muted" style="margin-left: 10px;">Step 2 / 2 · 拖拉或點 ↑/↓ 排序，點預算數字可改</span>
+      </li>
+      ${parts.join("")}
+    `;
+    document.getElementById("sched-back-button")?.addEventListener("click", () => {
+      stage = "select";
+      renderAll();
+    });
+    bindScheduleEvents();
+    bindScheduleDrag();
+    bindBudgetCells();
+  }
+
+  function renderScheduleGantt() {
+    const { days, allocations, budgetsLeft, limit } = computeSchedule();
+    const weekdayNames = ["日", "一", "二", "三", "四", "五", "六"];
+    const dayCards = days
+      .map((date, i) => {
+        const items = allocations[i];
+        if (items.length === 0) return "";
+        const used = +(limit - budgetsLeft[i]).toFixed(2);
+        const statusClass = budgetsLeft[i] <= 0.01 ? "full" : "partial";
+        const dateObj = new Date(`${date}T12:00:00`);
+        const weekday = weekdayNames[dateObj.getDay()];
+        const itemList = `<ul class="pj-gantt-items">${items
+          .map(
+            (item) => `
+              <li>
+                <span class="pj-gantt-hours">${item.hours}h</span>
+                <span class="pj-gantt-issue">#${item.issue_id} ${escapeHtml(item.subject)}</span>
+                ${item.project ? `<span class="tag">${escapeHtml(item.project)}</span>` : ""}
+              </li>`
+          )
+          .join("")}</ul>`;
+        return `
+          <div class="pj-gantt-day ${statusClass}">
+            <div class="pj-gantt-day-head">
+              <strong>${date} (週${weekday})</strong>
+              <span>${used} / ${limit} h</span>
+            </div>
+            ${itemList}
+          </div>
+        `;
+      })
+      .filter(Boolean)
+      .join("");
+    if (!dayCards) {
+      return emptyStateHtml({
+        icon: "📅",
+        title: "沒有需要排程的 issue",
+        hint: "預算皆為 0 或還沒勾選任何 project。可回 Step 1 重選或在預算欄位填入時數。",
+      });
+    }
+    return `<div class="pj-gantt-days">${dayCards}</div>`;
+  }
+
+  function bindBudgetCells() {
+    for (const btn of elements.issueList.querySelectorAll("[data-budget-toggle]")) {
+      btn.addEventListener("click", (event) => {
+        if (event.target.closest("[data-budget-clear]")) return;
+        const iid = Number(event.currentTarget.dataset.budgetToggle);
+        budgetEditIssueId = iid;
+        renderAll();
+        const input = document.querySelector(`[data-budget-input="${iid}"]`);
+        if (input) {
+          input.focus();
+          input.select();
+        }
+      });
+    }
+    for (const btn of elements.issueList.querySelectorAll("[data-budget-clear]")) {
+      btn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const iid = Number(event.currentTarget.dataset.budgetClear);
+        delete budgets[iid];
+        renderAll();
+      });
+    }
+    for (const input of elements.issueList.querySelectorAll("[data-budget-input]")) {
+      input.addEventListener("blur", (event) => {
+        const iid = Number(event.currentTarget.dataset.budgetInput);
+        const val = event.currentTarget.value.trim();
+        if (val === "") delete budgets[iid];
+        else budgets[iid] = val;
+        budgetEditIssueId = null;
+        renderAll();
+      });
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") event.currentTarget.blur();
+        else if (event.key === "Escape") {
+          budgetEditIssueId = null;
+          renderAll();
+        }
+      });
+    }
+  }
+
+  function bindScheduleDrag() {
+    for (const el of elements.issueList.querySelectorAll("[data-project-drag-id]")) {
+      el.addEventListener("dragstart", (event) => {
+        if (event.target.closest("[data-issue-drag]")) return;
+        dragContext = { kind: "project", projectId: Number(el.dataset.projectDragId) };
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", String(dragContext.projectId));
+      });
+      el.addEventListener("dragover", (event) => {
+        if (dragContext?.kind !== "project") return;
+        event.preventDefault();
+        el.classList.add("pj-drag-over");
+      });
+      el.addEventListener("dragleave", () => el.classList.remove("pj-drag-over"));
+      el.addEventListener("drop", (event) => {
+        event.preventDefault();
+        el.classList.remove("pj-drag-over");
+        if (dragContext?.kind !== "project") return;
+        const targetId = Number(el.dataset.projectDragId);
+        if (dragContext.projectId !== targetId) reorderProjectTo(dragContext.projectId, targetId);
+        dragContext = null;
+      });
+      el.addEventListener("dragend", () => {
+        dragContext = null;
+        for (const n of elements.issueList.querySelectorAll(".pj-drag-over")) n.classList.remove("pj-drag-over");
+      });
+    }
+    for (const el of elements.issueList.querySelectorAll("[data-issue-drag]")) {
+      el.addEventListener("dragstart", (event) => {
+        const [pid, iid] = el.dataset.issueDrag.split(":").map(Number);
+        dragContext = { kind: "issue", projectId: pid, issueId: iid };
+        event.dataTransfer.effectAllowed = "move";
+        event.stopPropagation();
+      });
+      el.addEventListener("dragover", (event) => {
+        if (dragContext?.kind !== "issue") return;
+        const [pid] = el.dataset.issueDrag.split(":").map(Number);
+        if (pid !== dragContext.projectId) return;
+        event.preventDefault();
+        event.stopPropagation();
+        el.classList.add("pj-drag-over");
+      });
+      el.addEventListener("dragleave", () => el.classList.remove("pj-drag-over"));
+      el.addEventListener("drop", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        el.classList.remove("pj-drag-over");
+        if (dragContext?.kind !== "issue") return;
+        const [pid, iid] = el.dataset.issueDrag.split(":").map(Number);
+        if (pid !== dragContext.projectId) return;
+        if (dragContext.issueId !== iid) reorderIssueTo(pid, dragContext.issueId, iid);
+        dragContext = null;
+      });
+    }
+  }
+
+  function bindScheduleEvents() {
+    for (const btn of elements.issueList.querySelectorAll("[data-move-project-up]")) {
+      btn.addEventListener("click", (e) => moveProject(Number(e.currentTarget.dataset.moveProjectUp), -1));
+    }
+    for (const btn of elements.issueList.querySelectorAll("[data-move-project-down]")) {
+      btn.addEventListener("click", (e) => moveProject(Number(e.currentTarget.dataset.moveProjectDown), 1));
+    }
+    for (const btn of elements.issueList.querySelectorAll("[data-move-issue-up]")) {
+      btn.addEventListener("click", (e) => {
+        const [pid, iid] = e.currentTarget.dataset.moveIssueUp.split(":").map(Number);
+        moveIssue(pid, iid, -1);
+      });
+    }
+    for (const btn of elements.issueList.querySelectorAll("[data-move-issue-down]")) {
+      btn.addEventListener("click", (e) => {
+        const [pid, iid] = e.currentTarget.dataset.moveIssueDown.split(":").map(Number);
+        moveIssue(pid, iid, 1);
+      });
+    }
+    for (const input of elements.issueList.querySelectorAll("[data-issue-budget]")) {
+      input.addEventListener("change", (e) => {
+        const iid = Number(e.currentTarget.dataset.issueBudget);
+        const val = e.currentTarget.value;
+        if (val === "") delete budgets[iid];
+        else budgets[iid] = val;
+        renderAll();
+      });
+    }
+  }
+
+  function reorderProjectTo(draggedId, targetId) {
+    const from = projectOrder.indexOf(draggedId);
+    const to = projectOrder.indexOf(targetId);
+    if (from < 0 || to < 0) return;
+    projectOrder.splice(from, 1);
+    projectOrder.splice(to, 0, draggedId);
+    renderAll();
+  }
+
+  function reorderIssueTo(pid, draggedId, targetId) {
+    const arr = issueOrder[pid];
+    if (!arr) return;
+    const from = arr.indexOf(draggedId);
+    const to = arr.indexOf(targetId);
+    if (from < 0 || to < 0) return;
+    arr.splice(from, 1);
+    arr.splice(to, 0, draggedId);
+    renderAll();
+  }
+
+  function moveProject(pid, delta) {
+    const idx = projectOrder.indexOf(pid);
+    if (idx < 0) return;
+    const ni = idx + delta;
+    if (ni < 0 || ni >= projectOrder.length) return;
+    projectOrder.splice(idx, 1);
+    projectOrder.splice(ni, 0, pid);
+    renderAll();
+  }
+
+  function moveIssue(pid, iid, delta) {
+    const arr = issueOrder[pid] || [];
+    const idx = arr.indexOf(iid);
+    if (idx < 0) return;
+    const ni = idx + delta;
+    if (ni < 0 || ni >= arr.length) return;
+    arr.splice(idx, 1);
+    arr.splice(ni, 0, iid);
+    renderAll();
+  }
+
+  // ─── Public API ─────────────────────────────────────────────────
+  function enter() {
+    stage = "select";
+    commitResults = [];
+  }
+
+  function isActive() {
+    return state.currentSource.type === "schedule";
+  }
+
+  function isReadyToApply() {
+    return stage === "arrange";
+  }
+
+  async function applyDates() {
+    const schedule = computeSchedule();
+    const entries = deriveIssueDatesFromSchedule(schedule);
+    if (entries.length === 0) {
+      showToast("目前沒有排入工時的 issue，無法送出", { type: "error" });
+      return;
+    }
+    const preview = entries
+      .map((e) => `  #${e.issue_id} ${e.subject}  ${e.start_date} → ${e.due_date}`)
+      .join("\n");
+    const ok = await showConfirmModal({
+      title: "確認送出排程",
+      body: `將更新 ${entries.length} 個 issue 的起迄日期：\n\n${preview}\n\n確定送出？`,
+      confirmText: "送出",
+      danger: false,
+    });
+    if (!ok) return;
+    const payload = {
+      entries: entries.map((e) => ({
+        issue_id: e.issue_id,
+        start_date: e.start_date,
+        due_date: e.due_date,
+      })),
+    };
+    await withLoading("更新 issue 起迄日期中...", async () => {
+      const data = await fetchJson("/api/schedule/apply-dates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      commitResults = data.results || [];
+    });
+    renderAll();
+  }
+
+  function renderLeftPanel() {
+    if (stage === "select") renderSelectStage();
+    else renderOrderingList();
+  }
+
+  function renderRightPanel() {
+    if (stage === "select") {
+      const count = selectedProjectIds.size;
+      elements.workbenchSummary.textContent =
+        count > 0
+          ? `已勾選 ${count} 個 project，按下方「開始排程 →」進入 Step 2`
+          : "從左側勾選要排程的 project（可複選）";
+      elements.tableWrap.innerHTML = `
+        <div class="pj-empty-state">
+          <p><strong>分配工時流程</strong></p>
+          <ol style="padding-left: 20px; line-height: 1.8;">
+            <li>Step 1：在左側勾選想要排程的 project（可複選）</li>
+            <li>Step 2：拖拉或 ↑/↓ 排序 project 與其內的 issue，點預算數字可覆寫</li>
+            <li>系統會依你排的順序從本週一開始填，每日上限 ${state.dailyHourLimit}h</li>
+          </ol>
+          <button class="pj-action-button" id="schedule-start-button" ${count === 0 ? "disabled" : ""}>
+            開始排程 (已選 ${count}) →
+          </button>
+        </div>
+      `;
+      document.getElementById("schedule-start-button")?.addEventListener("click", () => {
+        if (selectedProjectIds.size === 0) return;
+        stage = "arrange";
+        renderAll();
+      });
+      return;
+    }
+    const startText = state.batchSpentOn || "請先設定開始排程日期";
+    elements.workbenchSummary.textContent = `自 ${startText} 起連續十個工作日，每日上限 ${state.dailyHourLimit}h`;
+    elements.tableWrap.innerHTML = `
+      <div class="schedule-back-row">
+        <button class="pj-ghost-button pj-schedule-back-button" id="pj-schedule-back-button" type="button">← 重新選擇 Project</button>
+      </div>
+      ${renderScheduleGantt()}
+    `;
+    document.getElementById("pj-schedule-back-button")?.addEventListener("click", () => {
+      stage = "select";
+      renderAll();
+    });
+  }
+
+  function renderResults() {
+    if (!commitResults.length) return "";
+    const ok = commitResults.filter((r) => r.ok).length;
+    const fail = commitResults.filter((r) => r.error).length;
+    const lines = commitResults.map((r) => {
+      if (r.ok) return `✓ #${r.issue_id}  ${r.start_date} → ${r.due_date}`;
+      return `✗ #${r.issue_id ?? "?"}  ${r.error}`;
+    });
+    return `
+      <div class="alert ${fail ? "warn" : ""}">
+        <strong>Issue 起迄日更新結果 (${ok} 成功 / ${fail} 失敗)</strong>
+        <ul class="pj-result-list">
+          ${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join("")}
+        </ul>
+      </div>
+    `;
+  }
+
+  return { enter, isActive, isReadyToApply, applyDates, renderLeftPanel, renderRightPanel, renderResults };
+})();
+
 const THEME_KEY = "lawpj.theme";
 
 let lastFocusedEntryId = null;
@@ -4057,7 +4664,7 @@ async function switchSource(source) {
 
 function renderTopTabs() {
   // 計算當前的 sidebar view：worklog / schedule / phrases / sources
-  const isSchedule = state.currentSource.type === "schedule";
+  const isSchedule = ScheduleEditor.isActive();
   const sideView = state.sideView ||
     (isSchedule ? "schedule" : "worklog");
   for (const btn of document.querySelectorAll("[data-side-view]")) {
@@ -4179,12 +4786,8 @@ function renderIssueList() {
     btn.classList.toggle("active", (state.filterDate || "") === targetDate);
   }
 
-  if (state.currentSource.type === "schedule") {
-    if (state.scheduleStage === "select") {
-      renderScheduleSelectStage();
-    } else {
-      renderScheduleOrderingList();
-    }
+  if (ScheduleEditor.isActive()) {
+    ScheduleEditor.renderLeftPanel();
     return;
   }
 
@@ -4238,9 +4841,8 @@ function renderAlerts() {
   if (state.commitResults.length) {
     main.push(renderResults());
   }
-  if (state.scheduleCommitResults.length) {
-    main.push(renderScheduleResults());
-  }
+  const scheduleResultsHtml = ScheduleEditor.renderResults();
+  if (scheduleResultsHtml) main.push(scheduleResultsHtml);
   if (elements.alertStack) elements.alertStack.innerHTML = main.join("");
 
   // 分流到各 view 自己的 alert container；找不到容器則 fallback 推回主 stack
@@ -4259,23 +4861,6 @@ function renderAlerts() {
   } else if (sourcesHtml && elements.alertStack) {
     elements.alertStack.insertAdjacentHTML("beforeend", sourcesHtml);
   }
-}
-
-function renderScheduleResults() {
-  const ok = state.scheduleCommitResults.filter((r) => r.ok).length;
-  const fail = state.scheduleCommitResults.filter((r) => r.error).length;
-  const lines = state.scheduleCommitResults.map((r) => {
-    if (r.ok) return `✓ #${r.issue_id}  ${r.start_date} → ${r.due_date}`;
-    return `✗ #${r.issue_id ?? "?"}  ${r.error}`;
-  });
-  return `
-    <div class="alert ${fail ? "warn" : ""}">
-      <strong>Issue 起迄日更新結果 (${ok} 成功 / ${fail} 失敗)</strong>
-      <ul class="pj-result-list">
-        ${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join("")}
-      </ul>
-    </div>
-  `;
 }
 
 function activityOptionsHtml(currentValue) {
@@ -4460,8 +5045,8 @@ function selectedValidRows() {
 }
 
 function updateButtons() {
-  const isSchedule = state.currentSource.type === "schedule";
-  const isArrange = isSchedule && state.scheduleStage === "arrange";
+  const isSchedule = ScheduleEditor.isActive();
+  const isArrange = isSchedule && ScheduleEditor.isReadyToApply();
   if (elements.stickyActions) {
     elements.stickyActions.style.display = isSchedule ? "none" : "";
   }
@@ -4543,45 +5128,8 @@ function renderResults() {
 }
 
 function renderTable() {
-  if (state.currentSource.type === "schedule") {
-    if (state.scheduleStage === "select") {
-      const count = state.scheduleSelectedProjectIds.size;
-      elements.workbenchSummary.textContent =
-        count > 0
-          ? `已勾選 ${count} 個 project，按下方「開始排程 →」進入 Step 2`
-          : "從左側勾選要排程的 project（可複選）";
-      elements.tableWrap.innerHTML = `
-        <div class="pj-empty-state">
-          <p><strong>分配工時流程</strong></p>
-          <ol style="padding-left: 20px; line-height: 1.8;">
-            <li>Step 1：在左側勾選想要排程的 project（可複選）</li>
-            <li>Step 2：拖拉或 ↑/↓ 排序 project 與其內的 issue，點預算數字可覆寫</li>
-            <li>系統會依你排的順序從本週一開始填，每日上限 ${state.dailyHourLimit}h</li>
-          </ol>
-          <button class="pj-action-button" id="schedule-start-button" ${count === 0 ? "disabled" : ""}>
-            開始排程 (已選 ${count}) →
-          </button>
-        </div>
-      `;
-      document.getElementById("schedule-start-button")?.addEventListener("click", () => {
-        if (state.scheduleSelectedProjectIds.size === 0) return;
-        state.scheduleStage = "arrange";
-        renderAll();
-      });
-      return;
-    }
-    const startText = state.batchSpentOn || "請先設定開始排程日期";
-    elements.workbenchSummary.textContent = `自 ${startText} 起連續十個工作日，每日上限 ${state.dailyHourLimit}h`;
-    elements.tableWrap.innerHTML = `
-      <div class="schedule-back-row">
-        <button class="pj-ghost-button pj-schedule-back-button" id="pj-schedule-back-button" type="button">← 重新選擇 Project</button>
-      </div>
-      ${renderScheduleGantt()}
-    `;
-    document.getElementById("pj-schedule-back-button")?.addEventListener("click", () => {
-      state.scheduleStage = "select";
-      renderAll();
-    });
+  if (ScheduleEditor.isActive()) {
+    ScheduleEditor.renderRightPanel();
     return;
   }
   if (state.draftEntries.length === 0) {
@@ -4617,538 +5165,6 @@ function renderTable() {
     </table>
   `;
   bindTableEvents();
-}
-
-function workingDays(minCount = 10, baseDateStr) {
-  // baseDateStr (YYYY-MM-DD) = schedule base day. If omitted, fall back to
-  // state.batchSpentOn or today's Monday (legacy behaviour).
-  let start;
-  if (baseDateStr) {
-    const [y, m, d] = baseDateStr.split("-").map(Number);
-    start = new Date(y, (m || 1) - 1, d || 1);
-  } else {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const dow = today.getDay();
-    const daysFromMonday = dow === 0 ? 6 : dow - 1;
-    start = new Date(today);
-    start.setDate(today.getDate() - daysFromMonday);
-  }
-  const days = [];
-  const cursor = new Date(start);
-  const cap = 365;
-  while (days.length < minCount) {
-    const wd = cursor.getDay();
-    if (wd >= 1 && wd <= 5) days.push(localDateString(cursor));
-    cursor.setDate(cursor.getDate() + 1);
-    if (days.length >= cap) break;
-  }
-  return days;
-}
-
-function getIssueBudget(issue) {
-  const override = state.scheduleBudgets[issue.issue_id];
-  if (override !== undefined && override !== null && override !== "") {
-    const n = Number(override);
-    return Number.isFinite(n) && n > 0 ? n : 0;
-  }
-  const est = Number(issue.estimated_hours) || 0;
-  const spent = Number(issue.spent_hours) || 0;
-  return Math.max(est - spent, 0);
-}
-
-function collectAllProjects() {
-  const map = new Map();
-  for (const issue of state.issues) {
-    const pid = issue.project_id || 0;
-    if (!map.has(pid)) {
-      map.set(pid, {
-        id: pid,
-        name: issue.project || "(未指定)",
-        issueIds: [],
-        totalBudget: 0,
-      });
-    }
-    const entry = map.get(pid);
-    entry.issueIds.push(issue.issue_id);
-    const est = Number(issue.estimated_hours) || 0;
-    const spent = Number(issue.spent_hours) || 0;
-    entry.totalBudget += Math.max(est - spent, 0);
-  }
-  return map;
-}
-
-function ensureScheduleOrder() {
-  const projectMap = new Map();
-  for (const issue of state.issues) {
-    const pid = issue.project_id || 0;
-    if (!state.scheduleSelectedProjectIds.has(pid)) continue;
-    if (!projectMap.has(pid)) {
-      projectMap.set(pid, {
-        id: pid,
-        name: issue.project || "(未指定)",
-        issueIds: [],
-      });
-    }
-    projectMap.get(pid).issueIds.push(issue.issue_id);
-  }
-  const currentPids = new Set(projectMap.keys());
-  state.scheduleProjectOrder = state.scheduleProjectOrder.filter((pid) => currentPids.has(pid));
-  for (const pid of currentPids) {
-    if (!state.scheduleProjectOrder.includes(pid)) state.scheduleProjectOrder.push(pid);
-  }
-  for (const pid of currentPids) {
-    const currentIids = new Set(projectMap.get(pid).issueIds);
-    const existing = state.scheduleIssueOrder[pid] || [];
-    const cleaned = existing.filter((iid) => currentIids.has(iid));
-    for (const iid of projectMap.get(pid).issueIds) {
-      if (!cleaned.includes(iid)) cleaned.push(iid);
-    }
-    state.scheduleIssueOrder[pid] = cleaned;
-  }
-  return projectMap;
-}
-
-function computeSchedule() {
-  ensureScheduleOrder();
-  const limit = state.dailyHourLimit;
-  let totalDemand = 0;
-  for (const pid of state.scheduleProjectOrder) {
-    const issueOrder = state.scheduleIssueOrder[pid] || [];
-    for (const iid of issueOrder) {
-      const issue = state.issues.find((i) => i.issue_id === iid);
-      if (!issue) continue;
-      totalDemand += getIssueBudget(issue);
-    }
-  }
-  const daysNeeded = Math.max(10, Math.ceil(totalDemand / limit) + 1);
-  const days = workingDays(daysNeeded, state.batchSpentOn);
-  const budgetsLeft = days.map(() => limit);
-  const allocations = days.map(() => []);
-  for (const pid of state.scheduleProjectOrder) {
-    const issueOrder = state.scheduleIssueOrder[pid] || [];
-    for (const iid of issueOrder) {
-      const issue = state.issues.find((i) => i.issue_id === iid);
-      if (!issue) continue;
-      const total = getIssueBudget(issue);
-      if (total <= 0) continue;
-      let remaining = total;
-      for (let di = 0; di < days.length && remaining > 0.01; di++) {
-        const slot = Math.min(remaining, budgetsLeft[di]);
-        if (slot > 0.01) {
-          allocations[di].push({
-            issue_id: iid,
-            subject: issue.subject || "",
-            project: issue.project || "",
-            hours: +slot.toFixed(2),
-          });
-          budgetsLeft[di] = +(budgetsLeft[di] - slot).toFixed(2);
-          remaining = +(remaining - slot).toFixed(2);
-        }
-      }
-    }
-  }
-  return { days, allocations, budgetsLeft, limit };
-}
-
-function renderScheduleSelectStage() {
-  const projectMap = collectAllProjects();
-  const projects = Array.from(projectMap.values()).sort((a, b) => a.name.localeCompare(b.name));
-  if (!projects.length) {
-    elements.issueList.innerHTML = `<li>${emptyStateHtml({
-      icon: "📅",
-      title: "沒有可排程的 project",
-      hint: "先確認「我的 issue」分頁有資料（自己被指派的進行中 issue）。",
-    })}</li>`;
-    return;
-  }
-  elements.issueList.innerHTML = `
-    <li class="pj-sched-breadcrumb muted">Step 1 / 2 · 勾選要排程的 project</li>
-    ${projects
-      .map((proj) => {
-        const selected = state.scheduleSelectedProjectIds.has(proj.id);
-        return `
-          <li>
-            <label class="pj-sched-select-card ${selected ? "selected" : ""}">
-              <input type="checkbox" ${selected ? "checked" : ""} data-select-project="${proj.id}">
-              <span class="pj-sched-select-main">
-                <h3 class="pj-sched-select-title">${escapeHtml(proj.name)}</h3>
-                <div class="pj-sched-select-meta">${proj.issueIds.length} issues · 預估剩 ${proj.totalBudget.toFixed(1)}h</div>
-              </span>
-            </label>
-          </li>
-        `;
-      })
-      .join("")}
-  `;
-  for (const input of elements.issueList.querySelectorAll("[data-select-project]")) {
-    input.addEventListener("change", (event) => {
-      const pid = Number(event.currentTarget.dataset.selectProject);
-      if (event.currentTarget.checked) state.scheduleSelectedProjectIds.add(pid);
-      else state.scheduleSelectedProjectIds.delete(pid);
-      renderAll();
-    });
-  }
-}
-
-function renderScheduleOrderingList() {
-  const projectMap = ensureScheduleOrder();
-  if (!state.scheduleProjectOrder.length) {
-    elements.issueList.innerHTML = `
-      <li class="pj-sched-breadcrumb">
-        <button class="pj-ghost-button tiny" id="sched-back-button">← 重新選 project</button>
-      </li>
-      <li>${emptyStateHtml({
-        icon: "📅",
-        title: "沒有已勾選的 project",
-        hint: "請回到 Step 1 重新選擇要排程的 project。",
-      })}</li>
-    `;
-    document.getElementById("sched-back-button")?.addEventListener("click", () => {
-      state.scheduleStage = "select";
-      renderAll();
-    });
-    return;
-  }
-  const parts = state.scheduleProjectOrder.map((pid, pi) => {
-    const project = projectMap.get(pid);
-    if (!project) return "";
-    const isFirstProject = pi === 0;
-    const isLastProject = pi === state.scheduleProjectOrder.length - 1;
-    const issueIds = state.scheduleIssueOrder[pid] || [];
-    const issueBlocks = issueIds
-      .map((iid, ii) => {
-        const issue = state.issues.find((i) => i.issue_id === iid);
-        if (!issue) return "";
-        const isFirst = ii === 0;
-        const isLast = ii === issueIds.length - 1;
-        return `
-          <div class="pj-sched-issue" draggable="true" data-issue-drag="${pid}:${iid}">
-            <div class="pj-sched-issue-line">
-              <button class="pj-ghost-button tiny" ${isFirst ? "disabled" : ""} data-move-issue-up="${pid}:${iid}">↑</button>
-              <button class="pj-ghost-button tiny" ${isLast ? "disabled" : ""} data-move-issue-down="${pid}:${iid}">↓</button>
-              <span class="pj-issue-id">#${iid}</span>
-              <span class="pj-issue-title">${escapeHtml(issue.subject || "")}</span>
-              ${renderBudgetCell(issue)}
-            </div>
-          </div>
-        `;
-      })
-      .join("");
-    return `
-      <li class="pj-sched-project" draggable="true" data-project-drag-id="${pid}">
-        <div class="pj-sched-project-head">
-          <button class="pj-ghost-button tiny" ${isFirstProject ? "disabled" : ""} data-move-project-up="${pid}">↑</button>
-          <button class="pj-ghost-button tiny" ${isLastProject ? "disabled" : ""} data-move-project-down="${pid}">↓</button>
-          <strong>${escapeHtml(project.name)}</strong>
-          <span class="muted">(${project.issueIds.length} issues)</span>
-        </div>
-        ${issueBlocks}
-      </li>
-    `;
-  });
-  elements.issueList.innerHTML = `
-    <li class="pj-sched-breadcrumb">
-      <button class="pj-ghost-button tiny" id="sched-back-button">← 重新選 project</button>
-      <span class="muted" style="margin-left: 10px;">Step 2 / 2 · 拖拉或點 ↑/↓ 排序，點預算數字可改</span>
-    </li>
-    ${parts.join("")}
-  `;
-  document.getElementById("sched-back-button")?.addEventListener("click", () => {
-    state.scheduleStage = "select";
-    renderAll();
-  });
-  bindScheduleEvents();
-  bindScheduleDrag();
-  bindBudgetCells();
-}
-
-function renderBudgetCell(issue) {
-  const iid = issue.issue_id;
-  const override = state.scheduleBudgets[iid];
-  const est = Number(issue.estimated_hours) || 0;
-  const spent = Number(issue.spent_hours) || 0;
-  const remaining = Math.max(est - spent, 0);
-  const hasOverride = override !== undefined && override !== null && override !== "";
-  const displayValue = hasOverride ? Number(override) : remaining;
-  const isEditing = state.budgetEditIssueId === iid;
-  if (isEditing) {
-    return `<input type="number" step="0.5" min="0" class="pj-budget-input" data-budget-input="${iid}" value="${escapeHtml(String(displayValue))}">`;
-  }
-  return `
-    <button class="pj-budget-badge ${hasOverride ? "override" : ""}" data-budget-toggle="${iid}" title="點擊編輯預算 (est ${est}h · spent ${spent}h)">
-      ${displayValue}h${hasOverride ? ` <span class="pj-clear-override" data-budget-clear="${iid}" title="清除覆寫">⟲</span>` : ""}
-    </button>
-  `;
-}
-
-function bindBudgetCells() {
-  for (const btn of elements.issueList.querySelectorAll("[data-budget-toggle]")) {
-    btn.addEventListener("click", (event) => {
-      if (event.target.closest("[data-budget-clear]")) return;
-      const iid = Number(event.currentTarget.dataset.budgetToggle);
-      state.budgetEditIssueId = iid;
-      renderAll();
-      const input = document.querySelector(`[data-budget-input="${iid}"]`);
-      if (input) {
-        input.focus();
-        input.select();
-      }
-    });
-  }
-  for (const btn of elements.issueList.querySelectorAll("[data-budget-clear]")) {
-    btn.addEventListener("click", (event) => {
-      event.stopPropagation();
-      const iid = Number(event.currentTarget.dataset.budgetClear);
-      delete state.scheduleBudgets[iid];
-      renderAll();
-    });
-  }
-  for (const input of elements.issueList.querySelectorAll("[data-budget-input]")) {
-    input.addEventListener("blur", (event) => {
-      const iid = Number(event.currentTarget.dataset.budgetInput);
-      const val = event.currentTarget.value.trim();
-      if (val === "") delete state.scheduleBudgets[iid];
-      else state.scheduleBudgets[iid] = val;
-      state.budgetEditIssueId = null;
-      renderAll();
-    });
-    input.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") event.currentTarget.blur();
-      else if (event.key === "Escape") {
-        state.budgetEditIssueId = null;
-        renderAll();
-      }
-    });
-  }
-}
-
-function bindScheduleDrag() {
-  for (const el of elements.issueList.querySelectorAll("[data-project-drag-id]")) {
-    el.addEventListener("dragstart", (event) => {
-      if (event.target.closest("[data-issue-drag]")) return;
-      dragContext = { kind: "project", projectId: Number(el.dataset.projectDragId) };
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", String(dragContext.projectId));
-    });
-    el.addEventListener("dragover", (event) => {
-      if (dragContext?.kind !== "project") return;
-      event.preventDefault();
-      el.classList.add("pj-drag-over");
-    });
-    el.addEventListener("dragleave", () => el.classList.remove("pj-drag-over"));
-    el.addEventListener("drop", (event) => {
-      event.preventDefault();
-      el.classList.remove("pj-drag-over");
-      if (dragContext?.kind !== "project") return;
-      const targetId = Number(el.dataset.projectDragId);
-      if (dragContext.projectId !== targetId) reorderProjectTo(dragContext.projectId, targetId);
-      dragContext = null;
-    });
-    el.addEventListener("dragend", () => {
-      dragContext = null;
-      for (const n of elements.issueList.querySelectorAll(".pj-drag-over")) n.classList.remove("pj-drag-over");
-    });
-  }
-  for (const el of elements.issueList.querySelectorAll("[data-issue-drag]")) {
-    el.addEventListener("dragstart", (event) => {
-      const [pid, iid] = el.dataset.issueDrag.split(":").map(Number);
-      dragContext = { kind: "issue", projectId: pid, issueId: iid };
-      event.dataTransfer.effectAllowed = "move";
-      event.stopPropagation();
-    });
-    el.addEventListener("dragover", (event) => {
-      if (dragContext?.kind !== "issue") return;
-      const [pid] = el.dataset.issueDrag.split(":").map(Number);
-      if (pid !== dragContext.projectId) return;
-      event.preventDefault();
-      event.stopPropagation();
-      el.classList.add("pj-drag-over");
-    });
-    el.addEventListener("dragleave", () => el.classList.remove("pj-drag-over"));
-    el.addEventListener("drop", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      el.classList.remove("pj-drag-over");
-      if (dragContext?.kind !== "issue") return;
-      const [pid, iid] = el.dataset.issueDrag.split(":").map(Number);
-      if (pid !== dragContext.projectId) return;
-      if (dragContext.issueId !== iid) reorderIssueTo(pid, dragContext.issueId, iid);
-      dragContext = null;
-    });
-  }
-}
-
-function reorderProjectTo(draggedId, targetId) {
-  const arr = state.scheduleProjectOrder;
-  const from = arr.indexOf(draggedId);
-  const to = arr.indexOf(targetId);
-  if (from < 0 || to < 0) return;
-  arr.splice(from, 1);
-  arr.splice(to, 0, draggedId);
-  renderAll();
-}
-
-function reorderIssueTo(pid, draggedId, targetId) {
-  const arr = state.scheduleIssueOrder[pid];
-  if (!arr) return;
-  const from = arr.indexOf(draggedId);
-  const to = arr.indexOf(targetId);
-  if (from < 0 || to < 0) return;
-  arr.splice(from, 1);
-  arr.splice(to, 0, draggedId);
-  renderAll();
-}
-
-function bindScheduleEvents() {
-  for (const btn of elements.issueList.querySelectorAll("[data-move-project-up]")) {
-    btn.addEventListener("click", (e) => moveProject(Number(e.currentTarget.dataset.moveProjectUp), -1));
-  }
-  for (const btn of elements.issueList.querySelectorAll("[data-move-project-down]")) {
-    btn.addEventListener("click", (e) => moveProject(Number(e.currentTarget.dataset.moveProjectDown), 1));
-  }
-  for (const btn of elements.issueList.querySelectorAll("[data-move-issue-up]")) {
-    btn.addEventListener("click", (e) => {
-      const [pid, iid] = e.currentTarget.dataset.moveIssueUp.split(":").map(Number);
-      moveIssue(pid, iid, -1);
-    });
-  }
-  for (const btn of elements.issueList.querySelectorAll("[data-move-issue-down]")) {
-    btn.addEventListener("click", (e) => {
-      const [pid, iid] = e.currentTarget.dataset.moveIssueDown.split(":").map(Number);
-      moveIssue(pid, iid, 1);
-    });
-  }
-  for (const input of elements.issueList.querySelectorAll("[data-issue-budget]")) {
-    input.addEventListener("change", (e) => {
-      const iid = Number(e.currentTarget.dataset.issueBudget);
-      const val = e.currentTarget.value;
-      if (val === "") delete state.scheduleBudgets[iid];
-      else state.scheduleBudgets[iid] = val;
-      renderAll();
-    });
-  }
-}
-
-function moveProject(pid, delta) {
-  const arr = state.scheduleProjectOrder;
-  const idx = arr.indexOf(pid);
-  if (idx < 0) return;
-  const ni = idx + delta;
-  if (ni < 0 || ni >= arr.length) return;
-  arr.splice(idx, 1);
-  arr.splice(ni, 0, pid);
-  renderAll();
-}
-
-function moveIssue(pid, iid, delta) {
-  const arr = state.scheduleIssueOrder[pid] || [];
-  const idx = arr.indexOf(iid);
-  if (idx < 0) return;
-  const ni = idx + delta;
-  if (ni < 0 || ni >= arr.length) return;
-  arr.splice(idx, 1);
-  arr.splice(ni, 0, iid);
-  renderAll();
-}
-
-function deriveIssueDatesFromSchedule(schedule) {
-  const map = new Map();
-  for (let i = 0; i < schedule.days.length; i++) {
-    const date = schedule.days[i];
-    for (const item of schedule.allocations[i]) {
-      const existing = map.get(item.issue_id);
-      if (!existing) {
-        map.set(item.issue_id, {
-          issue_id: item.issue_id,
-          subject: item.subject,
-          start_date: date,
-          due_date: date,
-        });
-      } else {
-        existing.due_date = date;
-      }
-    }
-  }
-  return Array.from(map.values());
-}
-
-async function applyScheduleDates() {
-  const schedule = computeSchedule();
-  const entries = deriveIssueDatesFromSchedule(schedule);
-  if (entries.length === 0) {
-    showToast("目前沒有排入工時的 issue，無法送出", { type: "error" });
-    return;
-  }
-  const preview = entries
-    .map((e) => `  #${e.issue_id} ${e.subject}  ${e.start_date} → ${e.due_date}`)
-    .join("\n");
-  const ok = await showConfirmModal({
-    title: "確認送出排程",
-    body: `將更新 ${entries.length} 個 issue 的起迄日期：\n\n${preview}\n\n確定送出？`,
-    confirmText: "送出",
-    danger: false,
-  });
-  if (!ok) return;
-  const payload = {
-    entries: entries.map((e) => ({
-      issue_id: e.issue_id,
-      start_date: e.start_date,
-      due_date: e.due_date,
-    })),
-  };
-  await withLoading("更新 issue 起迄日期中...", async () => {
-    const data = await fetchJson("/api/schedule/apply-dates", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    state.scheduleCommitResults = data.results || [];
-  });
-  renderAll();
-}
-
-function renderScheduleGantt() {
-  const { days, allocations, budgetsLeft, limit } = computeSchedule();
-  const weekdayNames = ["日", "一", "二", "三", "四", "五", "六"];
-  const dayCards = days
-    .map((date, i) => {
-      const items = allocations[i];
-      if (items.length === 0) return "";
-      const used = +(limit - budgetsLeft[i]).toFixed(2);
-      const statusClass = budgetsLeft[i] <= 0.01 ? "full" : "partial";
-      const dateObj = new Date(`${date}T12:00:00`);
-      const weekday = weekdayNames[dateObj.getDay()];
-      const itemList = `<ul class="pj-gantt-items">${items
-        .map(
-          (item) => `
-            <li>
-              <span class="pj-gantt-hours">${item.hours}h</span>
-              <span class="pj-gantt-issue">#${item.issue_id} ${escapeHtml(item.subject)}</span>
-              ${item.project ? `<span class="tag">${escapeHtml(item.project)}</span>` : ""}
-            </li>`
-        )
-        .join("")}</ul>`;
-      return `
-        <div class="pj-gantt-day ${statusClass}">
-          <div class="pj-gantt-day-head">
-            <strong>${date} (週${weekday})</strong>
-            <span>${used} / ${limit} h</span>
-          </div>
-          ${itemList}
-        </div>
-      `;
-    })
-    .filter(Boolean)
-    .join("");
-  if (!dayCards) {
-    return emptyStateHtml({
-      icon: "📅",
-      title: "沒有需要排程的 issue",
-      hint: "預算皆為 0 或還沒勾選任何 project。可回 Step 1 重選或在預算欄位填入時數。",
-    });
-  }
-  return `<div class="pj-gantt-days">${dayCards}</div>`;
 }
 
 // Plain-text 摘要給 dropdown menu item 用 (避免 HTML chips 在 button 內巢狀)
@@ -6233,9 +6249,10 @@ for (const btn of document.querySelectorAll("[data-side-view]")) {
   btn.addEventListener("click", async () => {
     const target = btn.dataset.sideView;
     state.sideView = target;
-    const isSchedule = state.currentSource.type === "schedule";
+    const isSchedule = ScheduleEditor.isActive();
     try {
       if (target === "schedule" && !isSchedule) {
+        ScheduleEditor.enter();
         await switchSource({ type: "schedule" });
       } else if (target === "worklog" && isSchedule) {
         await switchSource({ type: "mine" });
@@ -6377,7 +6394,7 @@ for (const btn of document.querySelectorAll("[data-day-filter]")) {
 if (elements.scheduleApplyButton) {
   elements.scheduleApplyButton.addEventListener("click", async () => {
     try {
-      await applyScheduleDates();
+      await ScheduleEditor.applyDates();
     } catch (error) {
       state.issueWarnings = [error.message || String(error)];
       renderAll();
