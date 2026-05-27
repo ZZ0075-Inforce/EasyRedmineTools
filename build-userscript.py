@@ -243,67 +243,39 @@ def split_selector_list(sel: str) -> list[str]:
     return parts
 
 
-def replace_function_body(src: str, signature_prefix: str, new_body: str) -> str:
-    """找到以 signature_prefix 開頭的函式宣告，找到第一個 '{' 起算的整個 balanced block，替換成 new_body。"""
-    idx = src.find(signature_prefix)
-    if idx < 0:
-        raise SystemExit(f"找不到函式：{signature_prefix}")
-    brace_start = src.find("{", idx + len(signature_prefix))
-    if brace_start < 0:
-        raise SystemExit(f"函式 {signature_prefix} 缺少 '{{'")
-    depth = 0
-    i = brace_start
-    n = len(src)
-    while i < n:
-        c = src[i]
-        if c in ('"', "'", "`"):
-            q = c
-            i += 1
-            while i < n and src[i] != q:
-                if src[i] == "\\":
-                    i += 1
-                i += 1
-            i += 1
-            continue
-        if c == "/" and i + 1 < n:
-            if src[i + 1] == "/":
-                i = src.find("\n", i)
-                if i < 0:
-                    i = n
-                continue
-            if src[i + 1] == "*":
-                end = src.find("*/", i + 2)
-                i = (end + 2) if end != -1 else n
-                continue
-        if c == "{":
-            depth += 1
-        elif c == "}":
-            depth -= 1
-            if depth == 0:
-                # replace src[idx : i+1]
-                return src[:idx] + signature_prefix + new_body + src[i + 1:]
-        i += 1
-    raise SystemExit(f"無法找到 {signature_prefix} 的結尾")
+def replace_between_sentinels(src: str, begin: str, end: str, new_content: str) -> str:
+    """以 sentinel 註解為錨點替換中間內容（含兩個 sentinel 自身）。
+    用法：在源碼裡夾 // @build:foo-begin ... // @build:foo-end，
+    build 時整段（含註解）替換為 new_content。比對 function signature
+    精準字串穩定——可改空白 / 參數預設值 / 函式名而 build 不會 silent fail。
+    Sentinel 找不到時拋錯，build 大聲失敗而非默默產出壞 bundle。"""
+    b = src.find(begin)
+    if b < 0:
+        raise SystemExit(f"build sentinel not found: {begin}")
+    e = src.find(end, b + len(begin))
+    if e < 0:
+        raise SystemExit(f"build sentinel not found: {end} (after {begin})")
+    return src[:b] + new_content + src[e + len(end):]
 
 
 def transform_app_core(js_source: str) -> str:
     """把 worklog_app.js 改造成可在 overlay 掛載後才啟動的函式。"""
 
-    # 1. fetchJson 改走轉接器（用 balanced brace 替換整個函式本體）
-    js_source = replace_function_body(
+    # 1. fetchJson 改走轉接器（sentinel-wrapped 區塊整段換成 stub）
+    js_source = replace_between_sentinels(
         js_source,
-        "async function fetchJson(url, options = {}) ",
-        "{ return window.__worklog_fetchJson(url, options); }",
+        "// @build:fetchJson-stub-begin",
+        "// @build:fetchJson-stub-end",
+        "async function fetchJson(url, options) { return window.__worklog_fetchJson(url, options); }",
     )
 
-    # 2. 主題切換從 <html> 改到 #__worklog_root
-    js_source = js_source.replace(
-        'document.documentElement.setAttribute("data-theme", "dark")',
-        'document.getElementById("__worklog_root")?.setAttribute("data-theme", "dark")',
-    )
-    js_source = js_source.replace(
-        'document.documentElement.removeAttribute("data-theme")',
-        'document.getElementById("__worklog_root")?.removeAttribute("data-theme")',
+    # 2. 主題切換從 <html> 改到 #__worklog_root（sentinel-wrapped if/else 兩行）
+    js_source = replace_between_sentinels(
+        js_source,
+        "// @build:theme-toggle-begin",
+        "// @build:theme-toggle-end",
+        '  if (theme === "dark") document.getElementById("__worklog_root")?.setAttribute("data-theme", "dark");\n'
+        '  else document.getElementById("__worklog_root")?.removeAttribute("data-theme");',
     )
 
     # 3. 最後的 initializeApp().catch(...) 保留在函式內，第一次 mount 時會執行

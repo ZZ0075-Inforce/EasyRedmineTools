@@ -987,8 +987,10 @@ function loadTheme() {
 
 function applyTheme(theme) {
   state.theme = theme;
+  // @build:theme-toggle-begin
   if (theme === "dark") document.documentElement.setAttribute("data-theme", "dark");
   else document.documentElement.removeAttribute("data-theme");
+  // @build:theme-toggle-end
   try { localStorage.setItem(THEME_KEY, theme); } catch {}
 }
 
@@ -1149,6 +1151,7 @@ async function withLoading(message, action) {
   }
 }
 
+// @build:fetchJson-stub-begin
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, options);
   const data = await response.json();
@@ -1157,6 +1160,7 @@ async function fetchJson(url, options = {}) {
   }
   return data;
 }
+// @build:fetchJson-stub-end
 
 async function fetchActivities() {
   const data = await fetchJson("/api/time-entry-activities");

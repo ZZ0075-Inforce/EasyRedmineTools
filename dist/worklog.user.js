@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605271303
+// @version      1.0.202605271308
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -3363,8 +3363,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605271303";
-const APP_BUILD_TIME = "2026-05-27 13:03";
+const APP_VERSION = "1.0.202605271308";
+const APP_BUILD_TIME = "2026-05-27 13:08";
 
 const state = {
   localToday: localDateString(new Date()),
@@ -4351,7 +4351,7 @@ function loadTheme() {
 
 function applyTheme(theme) {
   state.theme = theme;
-  if (theme === "dark") document.getElementById("__worklog_root")?.setAttribute("data-theme", "dark");
+    if (theme === "dark") document.getElementById("__worklog_root")?.setAttribute("data-theme", "dark");
   else document.getElementById("__worklog_root")?.removeAttribute("data-theme");
   try { localStorage.setItem(THEME_KEY, theme); } catch {}
 }
@@ -4513,7 +4513,7 @@ async function withLoading(message, action) {
   }
 }
 
-async function fetchJson(url, options = {}) { return window.__worklog_fetchJson(url, options); }
+async function fetchJson(url, options) { return window.__worklog_fetchJson(url, options); }
 
 async function fetchActivities() {
   const data = await fetchJson("/api/time-entry-activities");
