@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605271437
+// @version      1.0.202605271514
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -3377,8 +3377,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605271437";
-const APP_BUILD_TIME = "2026-05-27 14:37";
+const APP_VERSION = "1.0.202605271514";
+const APP_BUILD_TIME = "2026-05-27 15:14";
 
 const state = {
   localToday: localDateString(new Date()),
@@ -3491,7 +3491,8 @@ const PhraseMenu = (() => {
 /* ===== Renders：state-slice → render fn 訂閱 dispatcher ==================
  * 取代「mutate state.X; renderAll()」的 shallow coordinator pattern。
  * 一次 notify(slice) 只觸發訂閱該 slice 的 render，加上一個 cross-cutting bundle。
- * 目前 phrases + draftEntries + schedule 走這條 — 其餘 state 暫時仍是 renderAll()。
+ * 目前 phrases + draftEntries + schedule + savedQueries + issueTemplateDefaults
+ * 走這條 — 其餘跨 slice 的 mutation (例: 刪 query 連帶切 source) 仍是 renderAll()。
  */
 const Renders = (() => {
   const subs = new Map();  // sliceKey → Set<fn>
@@ -3542,6 +3543,13 @@ Renders.subscribe(["draftEntries"], () => renderAlerts());
 Renders.subscribe(["schedule"], () => ScheduleEditor.renderLeftPanel());
 Renders.subscribe(["schedule"], () => ScheduleEditor.renderRightPanel());
 Renders.subscribe(["schedule"], () => renderAlerts());
+
+// 註冊 savedQueries 訂閱（新增 PJ 篩選器後 pj-source-tab 列與 drawer 同步刷新）
+Renders.subscribe(["savedQueries"], () => renderSourceTabs());
+Renders.subscribe(["savedQueries"], () => renderSourcesDrawer());
+
+// 註冊 issueTemplateDefaults 訂閱（toggle default 後 entry table 的 star 圖示要更新）
+Renders.subscribe(["issueTemplateDefaults"], () => renderTable());
 
 // Cross-cutting：每次 notify 結尾跑一次（match renderAll 尾段）
 Renders.setCrossCutting(() => {
@@ -5025,7 +5033,7 @@ function bindTableEvents() {
       } catch (err) {
         showToast("操作失敗：" + (err.message || String(err)), { type: "error" });
       }
-      renderAll();
+      Renders.notify("issueTemplateDefaults");
     });
   }
 
@@ -6326,7 +6334,7 @@ elements.queryAddButton.addEventListener("click", async () => {
   try {
     await withLoading("加入 PJ 篩選器中...", addSavedQuery);
     if (!state.sourcesWarnings.length) showToast("已新增 PJ 篩選器");
-    renderAll();  // pj-source-tabs、saved-queries-list、view 都同步
+    Renders.notify("savedQueries");
   } catch (error) {
     state.sourcesWarnings = [error.message || String(error)];
     renderAlerts();
