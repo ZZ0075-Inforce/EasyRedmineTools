@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605271314
+// @version      1.0.202605271401
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -3356,8 +3356,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605271314";
-const APP_BUILD_TIME = "2026-05-27 13:14";
+const APP_VERSION = "1.0.202605271401";
+const APP_BUILD_TIME = "2026-05-27 14:01";
 
 const state = {
   localToday: localDateString(new Date()),
@@ -3470,7 +3470,7 @@ const PhraseMenu = (() => {
 /* ===== Renders：state-slice → render fn 訂閱 dispatcher ==================
  * 取代「mutate state.X; renderAll()」的 shallow coordinator pattern。
  * 一次 notify(slice) 只觸發訂閱該 slice 的 render，加上一個 cross-cutting bundle。
- * 目前只有 phrases 走這條 — 其餘 state 暫時仍是 renderAll()。
+ * 目前 phrases + draftEntries 走這條 — 其餘 state 暫時仍是 renderAll()。
  */
 const Renders = (() => {
   const subs = new Map();  // sliceKey → Set<fn>
@@ -3512,6 +3512,10 @@ Renders.subscribe(["phrases"], () => renderPhrasesDrawer());
 Renders.subscribe(["phrases"], () => {
   if (state.sideView === "inline-tools") renderInlineToolsView();
 });
+
+// 註冊 draftEntries 訂閱（entry table 與 pj-alert-stack 跟 draft 內容直接相關）
+Renders.subscribe(["draftEntries"], () => renderTable());
+Renders.subscribe(["draftEntries"], () => renderAlerts());
 
 // Cross-cutting：每次 notify 結尾跑一次（match renderAll 尾段）
 Renders.setCrossCutting(() => {
@@ -4708,7 +4712,7 @@ function bindIssueCheckboxes() {
       } else {
         removeDraftEntry(issueId);
       }
-      renderAll();
+      Renders.notify("draftEntries");
     });
   }
 }
@@ -4950,7 +4954,7 @@ function bindTableEvents() {
       entry[fieldName] = event.target.value;
       clearEntryPreviewState(entry);
       invalidatePreview(true);
-      renderAll();
+      Renders.notify("draftEntries");
     });
     field.addEventListener("focus", (event) => {
       lastFocusedEntryId = Number(event.target.dataset.issueId);
@@ -5007,7 +5011,7 @@ function bindTableEvents() {
       entry.hours = next === 0 ? "" : String(next);
       clearEntryPreviewState(entry);
       invalidatePreview(true);
-      renderAll();
+      Renders.notify("draftEntries");
     });
   }
 
@@ -5016,7 +5020,7 @@ function bindTableEvents() {
       event.stopPropagation();
       const issueId = Number(event.currentTarget.dataset.removeDraft);
       removeDraftEntry(issueId);
-      renderAll();
+      Renders.notify("draftEntries");
     });
   }
 }
@@ -6227,12 +6231,12 @@ elements.selectAllButton.addEventListener("click", () => {
       upsertDraftEntry(issue.issue_id);
     }
   }
-  renderAll();
+  Renders.notify("draftEntries");
 });
 
 elements.clearSelectionButton.addEventListener("click", () => {
   clearAllDrafts();
-  renderAll();
+  Renders.notify("draftEntries");
 });
 
 for (const btn of document.querySelectorAll("[data-side-view]")) {
