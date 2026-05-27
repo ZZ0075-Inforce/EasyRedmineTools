@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605280133
+// @version      1.0.202605280211
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -2458,6 +2458,7 @@ const GeminiClient = (() => {
       contents: [{ role: "user", parts: [{ text: userInput }] }],
       generationConfig: {
         responseMimeType: "application/json",
+        maxOutputTokens: 8192,
       },
     };
     if (sysprompt && sysprompt.trim()) {
@@ -3737,8 +3738,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605280133";
-const APP_BUILD_TIME = "2026-05-28 01:33";
+const APP_VERSION = "1.0.202605280211";
+const APP_BUILD_TIME = "2026-05-28 02:11";
 
 const state = {
   localToday: localDateString(new Date()),
@@ -4676,12 +4677,15 @@ const AISuggestModal = (() => {
     const roleStr = roleObj
       ? `[${role}] ${roleObj.label}（${roleObj.desc}）`
       : `[${role}]`;
+    const today = todayStr();
     const userInput = [
+      `今天日期：${today}`,
       `角色：${roleStr}`,
       `任務：${task}`,
       context ? `補充背景：${context}` : null,
       "",
       `請依此產生建議的 Redmine issue 清單。每筆 issue 的 subject 必須以 [${role}] 開頭。`,
+      `如果建議 start_date / due_date，請從今天（${today}）起算合理日期（YYYY-MM-DD 格式），不要使用過去日期。`,
     ].filter((line) => line !== null).join("\n");
     const cfg = AgentSettings.get(currentAgentId);
     elements.aiSuggestGenerate.disabled = true;
@@ -4746,6 +4750,8 @@ const AISuggestModal = (() => {
     // Safety net: AI 偶爾忘記帶 [ROLE] 前綴，client 端強制 prepend
     const role = elements.aiSuggestRole.value;
     const prefix = role ? `[${role}]` : "";
+    // Safety net: 過濾過去日期（AI 偶爾還是回 2023 之類）
+    const today = todayStr();
     for (const idx of selectedIdx) {
       const it = suggestions[idx];
       if (!it) continue;
@@ -4755,10 +4761,12 @@ const AISuggestModal = (() => {
       if (Number.isFinite(Number(it.estimated_hours)) && Number(it.estimated_hours) > 0) {
         row.estimated_hours = String(Number(it.estimated_hours));
       }
-      if (typeof it.start_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(it.start_date)) {
+      if (typeof it.start_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(it.start_date)
+          && it.start_date >= today) {
         row.start_date = it.start_date;
       }
-      if (typeof it.due_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(it.due_date)) {
+      if (typeof it.due_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(it.due_date)
+          && it.due_date >= today) {
         row.due_date = it.due_date;
       }
       state.batchRows.push(row);
@@ -7261,7 +7269,7 @@ function boot() {
   // Inline 工具（整合自舊 PJ_startToEndDate + PJ_workingHours）
   installInlineModal();  // 預先 inject mini modal 到 body（toolbar 點擊時用）
   installInlineTools();  // 若當前是 /issues/{id} 詳細頁就 inject form + toolbar
-  recordIssueVisit().catch(() => {});
+  VisitedIssuesRegistry.recordVisit().catch(() => {});
   // 一次性清掉舊殘留（deprecated keys）
   Store.del('launcher_pos');
   // inline 工具改用 phrase 關聯後不再用獨立 activity / comment 設定

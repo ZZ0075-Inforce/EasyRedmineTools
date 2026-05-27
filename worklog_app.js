@@ -938,12 +938,15 @@ const AISuggestModal = (() => {
     const roleStr = roleObj
       ? `[${role}] ${roleObj.label}（${roleObj.desc}）`
       : `[${role}]`;
+    const today = todayStr();
     const userInput = [
+      `今天日期：${today}`,
       `角色：${roleStr}`,
       `任務：${task}`,
       context ? `補充背景：${context}` : null,
       "",
       `請依此產生建議的 Redmine issue 清單。每筆 issue 的 subject 必須以 [${role}] 開頭。`,
+      `如果建議 start_date / due_date，請從今天（${today}）起算合理日期（YYYY-MM-DD 格式），不要使用過去日期。`,
     ].filter((line) => line !== null).join("\n");
     const cfg = AgentSettings.get(currentAgentId);
     elements.aiSuggestGenerate.disabled = true;
@@ -1008,6 +1011,8 @@ const AISuggestModal = (() => {
     // Safety net: AI 偶爾忘記帶 [ROLE] 前綴，client 端強制 prepend
     const role = elements.aiSuggestRole.value;
     const prefix = role ? `[${role}]` : "";
+    // Safety net: 過濾過去日期（AI 偶爾還是回 2023 之類）
+    const today = todayStr();
     for (const idx of selectedIdx) {
       const it = suggestions[idx];
       if (!it) continue;
@@ -1017,10 +1022,12 @@ const AISuggestModal = (() => {
       if (Number.isFinite(Number(it.estimated_hours)) && Number(it.estimated_hours) > 0) {
         row.estimated_hours = String(Number(it.estimated_hours));
       }
-      if (typeof it.start_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(it.start_date)) {
+      if (typeof it.start_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(it.start_date)
+          && it.start_date >= today) {
         row.start_date = it.start_date;
       }
-      if (typeof it.due_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(it.due_date)) {
+      if (typeof it.due_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(it.due_date)
+          && it.due_date >= today) {
         row.due_date = it.due_date;
       }
       state.batchRows.push(row);

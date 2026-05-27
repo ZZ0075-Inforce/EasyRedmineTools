@@ -461,7 +461,7 @@ def main() -> None:
         "  // Inline 工具（整合自舊 PJ_startToEndDate + PJ_workingHours）",
         "  installInlineModal();  // 預先 inject mini modal 到 body（toolbar 點擊時用）",
         "  installInlineTools();  // 若當前是 /issues/{id} 詳細頁就 inject form + toolbar",
-        "  recordIssueVisit().catch(() => {});",
+        "  VisitedIssuesRegistry.recordVisit().catch(() => {});",
         "  // 一次性清掉舊殘留（deprecated keys）",
         "  Store.del('launcher_pos');",
         "  // inline 工具改用 phrase 關聯後不再用獨立 activity / comment 設定",

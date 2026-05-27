@@ -66,7 +66,7 @@ node -e "new Function(require('fs').readFileSync('dist/worklog.user.js','utf8'))
    - `fetchJson` 函式體（brace-balancing 找完整函式邊界）換成 `return window.__worklog_fetchJson(url, options)`
    - `document.documentElement.setAttribute("data-theme"...)` 改為對 `#__worklog_root` 操作
    - `APP_VERSION` / `APP_BUILD_TIME` 用 regex 替換為 build 時間戳（讓設定→關於跟 @version metadata 同步）
-7. 串接成 IIFE：metadata → APP_HTML/APP_CSS template literals → runtime → settings-patch → overlay → menu-injector → wrapped app-core → bootstrap（boot() 呼叫 `injectTopMenu()` + `recordIssueVisit()` + 一次性 `Store.del("launcher_pos")` 清舊殘留）
+7. 串接成 IIFE：metadata → APP_HTML/APP_CSS template literals → runtime → settings-patch → overlay → menu-injector → wrapped app-core → bootstrap（boot() 呼叫 `injectTopMenu()` + `VisitedIssuesRegistry.recordVisit()` + 一次性 `Store.del("launcher_pos")` 清舊殘留）
 
 ### 認證設計
 

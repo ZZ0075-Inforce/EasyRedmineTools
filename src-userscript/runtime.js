@@ -272,6 +272,7 @@ const GeminiClient = (() => {
       contents: [{ role: "user", parts: [{ text: userInput }] }],
       generationConfig: {
         responseMimeType: "application/json",
+        maxOutputTokens: 8192,
       },
     };
     if (sysprompt && sysprompt.trim()) {
