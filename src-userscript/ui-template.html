@@ -1848,16 +1848,37 @@
             <span class="muted" id="sticky-summary">至少填入一筆工時後即可送出。</span>
             <button class="action-button" id="commit-button">送出工時</button>
           </div>
+        </aside>
+      </section>
+      </div><!-- /main-view worklog -->
+
+      <div class="main-view" data-view="schedule" hidden>
+      <section class="layout">
+        <article class="panel list-panel">
+          <div class="workbench-header">
+            <div>
+              <span class="section-title">兩週排程</span>
+              <div class="muted" id="schedule-list-summary">選擇要排程的專案</div>
+            </div>
+          </div>
+          <ul class="issue-list" id="schedule-issue-list"></ul>
+        </article>
+        <aside class="panel details-panel">
+          <div class="workbench-header">
+            <div>
+              <span class="section-title">甘特分配</span>
+              <div class="muted">每筆 issue 預估時數會自動分配到工作日</div>
+            </div>
+          </div>
+          <div class="alert-stack" id="schedule-alert-stack"></div>
+          <div class="table-wrap" id="schedule-table-wrap"></div>
           <div class="sticky-actions" id="sticky-actions-schedule" style="display:none;">
             <span class="muted">送出會用目前的甘特分配，更新每筆 issue 的起迄日期</span>
             <button class="action-button" id="schedule-apply-button">送出更新起迄日 →</button>
           </div>
         </aside>
       </section>
-      </div><!-- /main-view worklog -->
-
-      <!-- 兩週排程使用相同 layout，但 source-tabs 隱藏。重複一個 wrapper 不必，
-           讓 schedule 共用 worklog view 容器即可（renderTopTabs 會切換 main-toolbar 顯示） -->
+      </div><!-- /main-view schedule -->
 
       <div class="main-view" data-view="phrases" hidden>
         <article class="panel main-card-view">

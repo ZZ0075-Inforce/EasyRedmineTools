@@ -172,8 +172,8 @@ Renders.setCrossCutting(() => {
 
 /* ===== ScheduleEditor：兩週排程 view 集中地 ============================== */
 // 收進來: 7 state slice + dragContext + 19 schedule fns + applyScheduleDates。
-// 範圍備註: 此 deepening 只搬內聚 (B2)，schedule UI 仍透過 worklog 的
-// issue-list / table-wrap 容器渲染 (visibleView hack 留給未來 session)。
+// schedule view 已獨立成 main-view (data-view="schedule")，render 寫進
+// scheduleIssueList / scheduleTableWrap / scheduleAlertStack 三個專屬容器。
 const ScheduleEditor = (() => {
   // 私有 state（取代原 state.schedule* / state.budgetEditIssueId / 全域 dragContext）
   let stage = "select";                            // "select" | "arrange"
@@ -350,14 +350,14 @@ const ScheduleEditor = (() => {
     const projectMap = collectAllProjects();
     const projects = Array.from(projectMap.values()).sort((a, b) => a.name.localeCompare(b.name));
     if (!projects.length) {
-      elements.issueList.innerHTML = `<li>${emptyStateHtml({
+      elements.scheduleIssueList.innerHTML = `<li>${emptyStateHtml({
         icon: "📅",
         title: "沒有可排程的 project",
         hint: "先確認「我的 issue」分頁有資料（自己被指派的進行中 issue）。",
       })}</li>`;
       return;
     }
-    elements.issueList.innerHTML = `
+    elements.scheduleIssueList.innerHTML = `
       <li class="sched-breadcrumb muted">Step 1 / 2 · 勾選要排程的 project</li>
       ${projects
         .map((proj) => {
@@ -376,7 +376,7 @@ const ScheduleEditor = (() => {
         })
         .join("")}
     `;
-    for (const input of elements.issueList.querySelectorAll("[data-select-project]")) {
+    for (const input of elements.scheduleIssueList.querySelectorAll("[data-select-project]")) {
       input.addEventListener("change", (event) => {
         const pid = Number(event.currentTarget.dataset.selectProject);
         if (event.currentTarget.checked) selectedProjectIds.add(pid);
@@ -389,7 +389,7 @@ const ScheduleEditor = (() => {
   function renderOrderingList() {
     const projectMap = ensureScheduleOrder();
     if (!projectOrder.length) {
-      elements.issueList.innerHTML = `
+      elements.scheduleIssueList.innerHTML = `
         <li class="sched-breadcrumb">
           <button class="ghost-button tiny" id="sched-back-button">← 重新選 project</button>
         </li>
@@ -442,7 +442,7 @@ const ScheduleEditor = (() => {
         </li>
       `;
     });
-    elements.issueList.innerHTML = `
+    elements.scheduleIssueList.innerHTML = `
       <li class="sched-breadcrumb">
         <button class="ghost-button tiny" id="sched-back-button">← 重新選 project</button>
         <span class="muted" style="margin-left: 10px;">Step 2 / 2 · 拖拉或點 ↑/↓ 排序，點預算數字可改</span>
@@ -502,7 +502,7 @@ const ScheduleEditor = (() => {
   }
 
   function bindBudgetCells() {
-    for (const btn of elements.issueList.querySelectorAll("[data-budget-toggle]")) {
+    for (const btn of elements.scheduleIssueList.querySelectorAll("[data-budget-toggle]")) {
       btn.addEventListener("click", (event) => {
         if (event.target.closest("[data-budget-clear]")) return;
         const iid = Number(event.currentTarget.dataset.budgetToggle);
@@ -515,7 +515,7 @@ const ScheduleEditor = (() => {
         }
       });
     }
-    for (const btn of elements.issueList.querySelectorAll("[data-budget-clear]")) {
+    for (const btn of elements.scheduleIssueList.querySelectorAll("[data-budget-clear]")) {
       btn.addEventListener("click", (event) => {
         event.stopPropagation();
         const iid = Number(event.currentTarget.dataset.budgetClear);
@@ -523,7 +523,7 @@ const ScheduleEditor = (() => {
         renderAll();
       });
     }
-    for (const input of elements.issueList.querySelectorAll("[data-budget-input]")) {
+    for (const input of elements.scheduleIssueList.querySelectorAll("[data-budget-input]")) {
       input.addEventListener("blur", (event) => {
         const iid = Number(event.currentTarget.dataset.budgetInput);
         const val = event.currentTarget.value.trim();
@@ -543,7 +543,7 @@ const ScheduleEditor = (() => {
   }
 
   function bindScheduleDrag() {
-    for (const el of elements.issueList.querySelectorAll("[data-project-drag-id]")) {
+    for (const el of elements.scheduleIssueList.querySelectorAll("[data-project-drag-id]")) {
       el.addEventListener("dragstart", (event) => {
         if (event.target.closest("[data-issue-drag]")) return;
         dragContext = { kind: "project", projectId: Number(el.dataset.projectDragId) };
@@ -566,10 +566,10 @@ const ScheduleEditor = (() => {
       });
       el.addEventListener("dragend", () => {
         dragContext = null;
-        for (const n of elements.issueList.querySelectorAll(".drag-over")) n.classList.remove("drag-over");
+        for (const n of elements.scheduleIssueList.querySelectorAll(".drag-over")) n.classList.remove("drag-over");
       });
     }
-    for (const el of elements.issueList.querySelectorAll("[data-issue-drag]")) {
+    for (const el of elements.scheduleIssueList.querySelectorAll("[data-issue-drag]")) {
       el.addEventListener("dragstart", (event) => {
         const [pid, iid] = el.dataset.issueDrag.split(":").map(Number);
         dragContext = { kind: "issue", projectId: pid, issueId: iid };
@@ -599,25 +599,25 @@ const ScheduleEditor = (() => {
   }
 
   function bindScheduleEvents() {
-    for (const btn of elements.issueList.querySelectorAll("[data-move-project-up]")) {
+    for (const btn of elements.scheduleIssueList.querySelectorAll("[data-move-project-up]")) {
       btn.addEventListener("click", (e) => moveProject(Number(e.currentTarget.dataset.moveProjectUp), -1));
     }
-    for (const btn of elements.issueList.querySelectorAll("[data-move-project-down]")) {
+    for (const btn of elements.scheduleIssueList.querySelectorAll("[data-move-project-down]")) {
       btn.addEventListener("click", (e) => moveProject(Number(e.currentTarget.dataset.moveProjectDown), 1));
     }
-    for (const btn of elements.issueList.querySelectorAll("[data-move-issue-up]")) {
+    for (const btn of elements.scheduleIssueList.querySelectorAll("[data-move-issue-up]")) {
       btn.addEventListener("click", (e) => {
         const [pid, iid] = e.currentTarget.dataset.moveIssueUp.split(":").map(Number);
         moveIssue(pid, iid, -1);
       });
     }
-    for (const btn of elements.issueList.querySelectorAll("[data-move-issue-down]")) {
+    for (const btn of elements.scheduleIssueList.querySelectorAll("[data-move-issue-down]")) {
       btn.addEventListener("click", (e) => {
         const [pid, iid] = e.currentTarget.dataset.moveIssueDown.split(":").map(Number);
         moveIssue(pid, iid, 1);
       });
     }
-    for (const input of elements.issueList.querySelectorAll("[data-issue-budget]")) {
+    for (const input of elements.scheduleIssueList.querySelectorAll("[data-issue-budget]")) {
       input.addEventListener("change", (e) => {
         const iid = Number(e.currentTarget.dataset.issueBudget);
         const val = e.currentTarget.value;
@@ -730,7 +730,7 @@ const ScheduleEditor = (() => {
         count > 0
           ? `已勾選 ${count} 個 project，按下方「開始排程 →」進入 Step 2`
           : "從左側勾選要排程的 project（可複選）";
-      elements.tableWrap.innerHTML = `
+      elements.scheduleTableWrap.innerHTML = `
         <div class="empty-state">
           <p><strong>分配工時流程</strong></p>
           <ol style="padding-left: 20px; line-height: 1.8;">
@@ -752,7 +752,7 @@ const ScheduleEditor = (() => {
     }
     const startText = state.batchSpentOn || "請先設定開始排程日期";
     elements.workbenchSummary.textContent = `自 ${startText} 起連續十個工作日，每日上限 ${state.dailyHourLimit}h`;
-    elements.tableWrap.innerHTML = `
+    elements.scheduleTableWrap.innerHTML = `
       <div class="schedule-back-row">
         <button class="ghost-button schedule-back-button" id="schedule-back-button" type="button">← 重新選擇 Project</button>
       </div>
@@ -805,6 +805,9 @@ const elements = {
   issueList: document.getElementById("issue-list"),
   alertStack: document.getElementById("alert-stack"),
   tableWrap: document.getElementById("table-wrap"),
+  scheduleIssueList: document.getElementById("schedule-issue-list"),
+  scheduleTableWrap: document.getElementById("schedule-table-wrap"),
+  scheduleAlertStack: document.getElementById("schedule-alert-stack"),
   refreshButton: document.getElementById("refresh-button"),
   selectAllButton: document.getElementById("select-all-button"),
   clearSelectionButton: document.getElementById("clear-selection-button"),
@@ -1318,11 +1321,8 @@ function renderTopTabs() {
   for (const btn of document.querySelectorAll("[data-side-view]")) {
     btn.classList.toggle("active", btn.dataset.sideView === sideView);
   }
-  // schedule 共用 worklog view 容器（內部 renderTable / renderIssueList
-  // 會依 currentSource 自動切換 schedule 排程 UI）
-  const visibleView = sideView === "schedule" ? "worklog" : sideView;
   for (const v of document.querySelectorAll(".main-view")) {
-    v.hidden = v.dataset.view !== visibleView;
+    v.hidden = v.dataset.view !== sideView;
   }
   // source-tabs 列只在「填寫工時」顯示
   const mainToolbar = document.getElementById("main-toolbar");
@@ -1472,7 +1472,7 @@ function renderIssueList() {
 }
 
 function renderAlerts() {
-  // 主 alert-stack（worklog/schedule view 內）：issue/activity/preview 相關 + 送出結果
+  // 主 alert-stack（worklog view 內）：issue/activity/preview 相關 + 送出結果
   const main = [];
   if (state.issueWarnings.length) {
     main.push(`<div class="alert warn">${state.issueWarnings.map(escapeHtml).join("<br>")}</div>`);
@@ -1489,9 +1489,13 @@ function renderAlerts() {
   if (state.commitResults.length) {
     main.push(renderResults());
   }
-  const scheduleResultsHtml = ScheduleEditor.renderResults();
-  if (scheduleResultsHtml) main.push(scheduleResultsHtml);
   if (elements.alertStack) elements.alertStack.innerHTML = main.join("");
+
+  // schedule 結果寫進 schedule view 內專屬的 alert container
+  const scheduleResultsHtml = ScheduleEditor.renderResults();
+  if (elements.scheduleAlertStack) {
+    elements.scheduleAlertStack.innerHTML = scheduleResultsHtml || "";
+  }
 
   // 分流到各 view 自己的 alert container；找不到容器則 fallback 推回主 stack
   const phrasesHtml = state.phrasesWarnings.length
@@ -1695,22 +1699,13 @@ function selectedValidRows() {
 function updateButtons() {
   const isSchedule = ScheduleEditor.isActive();
   const isArrange = isSchedule && ScheduleEditor.isReadyToApply();
-  if (elements.stickyActions) {
-    elements.stickyActions.style.display = isSchedule ? "none" : "";
-  }
+  // sticky-actions-schedule 住在 schedule view 內，仍要靠 stage 控制顯隱
   if (elements.stickyActionsSchedule) {
     elements.stickyActionsSchedule.style.display = isArrange ? "flex" : "none";
   }
   if (elements.scheduleApplyButton) {
     elements.scheduleApplyButton.disabled = state.isLoading || !isArrange;
   }
-  if (elements.dailyTotalBadge) {
-    elements.dailyTotalBadge.style.display = isSchedule ? "none" : "";
-  }
-  const batchLabel = document.getElementById("batch-spent-on-label");
-  if (batchLabel) batchLabel.textContent = isSchedule ? "開始排程日期" : "工時日期";
-  const quickBtns = document.getElementById("date-quick-buttons");
-  if (quickBtns) quickBtns.style.display = isSchedule ? "none" : "";
   elements.refreshButton.disabled = state.isLoading;
   setBtnTitle(elements.refreshButton, state.isLoading && "載入中，請稍候");
   elements.selectAllButton.disabled = isSchedule || state.isLoading || filteredIssues().length === 0;
