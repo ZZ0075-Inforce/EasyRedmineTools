@@ -2542,109 +2542,14 @@ const InlineToolsConfig = (() => {
   return { render };
 })();
 
-/* ===== AGENT_TYPES：AI Agent registry (開發者預定義) ======================
- * 每個 agent 綁定一個 view 用途。Hard-code:
- * - defaultSysprompt: user 第一次用的 sysprompt（user 可改、改完存 GM）
- * - defaultModel: 預設模型
- * - outputSchema: Gemini responseSchema 強制 JSON 結構
- * - parseResponse: 從 Gemini 回的 data 抽出可用的 row array
- * User 在 AI 設定區只改 sysprompt + model；schema + parser 跟程式邏輯
- * 緊耦合，user 不能改。
+/* AGENT_TYPES / findAgentForView / AGENT_MODEL_OPTIONS / AgentSettings 已
+ * 搬到 src-userscript/runtime.js（outer scope，跟 GeminiClient 同層），
+ * 讓 settings-patch.js 求值時就能 lookup 到（修 0a82d85 的 race bug：
+ * applySettingsPatches 比 __initWorklogApp 早跑，舊位置的 window export
+ * 還未設置 → settings modal 內 AI Agent section 永遠 render 空）。
+ * worklog_app.js 內 IssueBatchEditor / AISuggestModal / AIFab 等 IIFE
+ * 透過 lexical scope 仍能引用 outer 的這些 const。
  */
-const AGENT_TYPES = {
-  "batch-issue": {
-    targetView: "issue-batch",
-    label: "批次建 issue Agent",
-    defaultSysprompt:
-      "你是專案管理助手。根據 user 提供的角色與任務背景，建議要建立的 Redmine issue。\n" +
-      "請只回 JSON，符合提供的 schema。\n" +
-      "每筆 issue 的 subject 簡潔具體（≤80 字），不重複，不要編號前綴。\n" +
-      "如果能合理推估，再附 estimated_hours（小時，正數）/ start_date / due_date（YYYY-MM-DD）。\n" +
-      "rationale 用一句話說明為何建議建這筆 issue（給 user 看的，繁體中文）。",
-    defaultModel: "gemma-4-26b-it",
-    outputSchema: {
-      type: "object",
-      properties: {
-        issues: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              subject: { type: "string" },
-              estimated_hours: { type: "number" },
-              start_date: { type: "string" },
-              due_date: { type: "string" },
-              rationale: { type: "string" },
-            },
-            required: ["subject"],
-          },
-        },
-      },
-      required: ["issues"],
-    },
-    parseResponse: (data) => (data && Array.isArray(data.issues) ? data.issues : [])
-      .filter((it) => it && typeof it.subject === "string" && it.subject.trim()),
-  },
-  // 未來: "schedule": {...}, "worklog": {...}
-};
-
-function findAgentForView(viewKey) {
-  for (const [id, type] of Object.entries(AGENT_TYPES)) {
-    if (type.targetView === viewKey) return id;
-  }
-  return null;
-}
-
-const AGENT_MODEL_OPTIONS = [
-  "gemma-4-26b-it",
-  "gemma-4-31b-it",
-  "gemma-3-27b-it",
-  "gemini-2.5-flash",
-];
-
-/* ===== AgentSettings：每個 agent 的 sysprompt + model 持久化 ===============
- * GM key: ai_agent_settings = { [agentTypeId]: { sysprompt, model } }
- * 沒設定的 agent 用 AGENT_TYPES[id].default*。
- */
-const AgentSettings = (() => {
-  const KEY = "ai_agent_settings";
-
-  function loadAll() {
-    return Store.get(KEY, {}) || {};
-  }
-
-  function get(agentTypeId) {
-    const type = AGENT_TYPES[agentTypeId];
-    if (!type) throw new Error(`unknown agent type: ${agentTypeId}`);
-    const saved = loadAll()[agentTypeId] || {};
-    return {
-      sysprompt: typeof saved.sysprompt === "string" ? saved.sysprompt : type.defaultSysprompt,
-      model: typeof saved.model === "string" && saved.model ? saved.model : type.defaultModel,
-    };
-  }
-
-  function save(agentTypeId, { sysprompt, model }) {
-    if (!AGENT_TYPES[agentTypeId]) throw new Error(`unknown agent type: ${agentTypeId}`);
-    const all = loadAll();
-    all[agentTypeId] = { sysprompt: sysprompt || "", model: model || "" };
-    Store.set(KEY, all);
-  }
-
-  function reset(agentTypeId) {
-    const all = loadAll();
-    delete all[agentTypeId];
-    Store.set(KEY, all);
-  }
-
-  return { get, save, reset };
-})();
-
-// 暴露給 settings-patch.js（outer scope）使用，因為 AGENT_TYPES / AgentSettings
-// / findAgentForView / AGENT_MODEL_OPTIONS 都宣告在 __initWorklogApp() 內部。
-window.__worklog_AGENT_TYPES = AGENT_TYPES;
-window.__worklog_AGENT_MODEL_OPTIONS = AGENT_MODEL_OPTIONS;
-window.__worklog_AgentSettings = AgentSettings;
-window.__worklog_findAgentForView = findAgentForView;
 
 /* ===== IssueBatchEditor：批次建 issue view (templates + rows + submit) =====
  * 收: 14 個 view fn + module-level row uid counter + 9 個主 scope handler

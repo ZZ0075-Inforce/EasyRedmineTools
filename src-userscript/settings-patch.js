@@ -160,13 +160,11 @@ function applySettingsPatches(root) {
   }
 
   // 若該 view 對應有 AI Agent，回傳 collapsible AI section HTML；無則回空字串
+  // AGENT_TYPES / AgentSettings / AGENT_MODEL_OPTIONS / findAgentForView 由
+  // runtime.js (outer scope) 提供，直接 lexical lookup。
   function renderViewAiSectionHtml(viewKey) {
-    const find = window.__worklog_findAgentForView;
-    const AGENT_TYPES = window.__worklog_AGENT_TYPES;
-    const AGENT_MODEL_OPTIONS = window.__worklog_AGENT_MODEL_OPTIONS;
-    const AgentSettings = window.__worklog_AgentSettings;
-    if (!find || !AGENT_TYPES || !AgentSettings) return "";
-    const agentId = find(viewKey);
+    if (typeof AGENT_TYPES === "undefined" || typeof AgentSettings === "undefined") return "";
+    const agentId = findAgentForView(viewKey);
     if (!agentId) return "";
     const type = AGENT_TYPES[agentId];
     const cfg = AgentSettings.get(agentId);
@@ -295,9 +293,9 @@ function applySettingsPatches(root) {
   }
 
   // ===== Per-view AI Agent section：sysprompt / model bind =====
-  const AgentSettings = window.__worklog_AgentSettings;
-  const AGENT_TYPES = window.__worklog_AGENT_TYPES;
-  if (AgentSettings && AGENT_TYPES) {
+  // AgentSettings / AGENT_TYPES / AGENT_MODEL_OPTIONS 由 runtime.js 提供 (outer
+  // scope), 直接 lexical lookup。
+  if (typeof AgentSettings !== "undefined" && typeof AGENT_TYPES !== "undefined") {
     for (const saveBtn of body.querySelectorAll("[data-ai-agent-save]")) {
       saveBtn.addEventListener("click", () => {
         const agentId = saveBtn.dataset.aiAgentSave;
@@ -319,7 +317,6 @@ function applySettingsPatches(root) {
         const sysprompt = body.querySelector(`[data-ai-agent-sysprompt="${agentId}"]`);
         const customInput = body.querySelector(`[data-ai-agent-custom-model="${agentId}"]`);
         const modelSelect = body.querySelector(`[data-ai-agent-model="${agentId}"]`);
-        const AGENT_MODEL_OPTIONS = window.__worklog_AGENT_MODEL_OPTIONS || [];
         if (sysprompt) sysprompt.value = cfg.sysprompt;
         if (AGENT_MODEL_OPTIONS.includes(cfg.model)) {
           if (modelSelect) modelSelect.value = cfg.model;
