@@ -37,7 +37,6 @@ const state = {
   phrasesWarnings: [],
   sourcesWarnings: [],
   issueTemplateDefaults: {},  // { [issue_id]: { hours, activity_id, comments } } inline snapshot
-  openPhraseMenuFor: null,    // 目前打開哪個 entry 的 phrase menu (issue_id 或 null)
   batchSpentOn: "",
   settingsOpen: false,
   settingsTab: "appearance",
@@ -55,6 +54,68 @@ const state = {
   theme: "light",
   scheduleCommitResults: [],
 };
+
+/* ===== PhraseMenu Controller ============================================ */
+// 「快速填入」下拉 menu 的 lifecycle 集中地：state / mutation / reposition /
+// 4 個 global listener 全收在這。renderAll 結尾呼 afterRender() 觸發 rAF 重定位。
+const PhraseMenu = (() => {
+  let openFor = null;  // issue_id 或 null（私有）
+
+  function toggleFor(issueId) {
+    openFor = openFor === issueId ? null : issueId;
+    renderAll();
+    if (openFor !== null) requestAnimationFrame(_reposition);
+  }
+
+  function close() {
+    if (openFor === null) return;
+    openFor = null;
+    renderAll();
+  }
+
+  function isOpenFor(issueId) {
+    return openFor === issueId;
+  }
+
+  function afterRender() {
+    if (openFor !== null) requestAnimationFrame(_reposition);
+  }
+
+  // Phrase popup 用 position: fixed 跳出 .table-wrap overflow clip
+  function _reposition() {
+    const popup = document.querySelector(".phrase-menu-popup");
+    if (!popup) return;
+    const wrap = popup.closest(".phrase-menu-wrap");
+    if (!wrap) return;
+    const btn = wrap.querySelector(".phrase-menu-button");
+    if (!btn) return;
+    const rect = btn.getBoundingClientRect();
+    const popupRect = popup.getBoundingClientRect();
+    let top = rect.bottom + 4;
+    let right = window.innerWidth - rect.right;
+    if (top + popupRect.height > window.innerHeight - 8) {
+      top = rect.top - popupRect.height - 4;
+    }
+    popup.style.top = `${Math.max(8, top)}px`;
+    popup.style.right = `${Math.max(8, right)}px`;
+    popup.style.left = "auto";
+  }
+
+  // 一次性安裝 4 個 global listener
+  document.addEventListener("click", (event) => {
+    if (openFor === null) return;
+    if (event.target.closest && event.target.closest("[data-phrase-menu]")) return;
+    close();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") close();
+  });
+  // capture: true 抓 nested scroll container（main-view / panel / table-wrap）
+  window.addEventListener("scroll", () => close(), true);
+  window.addEventListener("resize", () => close());
+
+  return { toggleFor, close, isOpenFor, afterRender };
+})();
 
 let dragContext = null;
 const THEME_KEY = "lawpj.theme";
@@ -834,7 +895,7 @@ function renderRow(entry) {
     .join("");
   const isFocused = lastFocusedEntryId === entry.issue_id;
   const hasDefault = !!state.issueTemplateDefaults[entry.issue_id];
-  const menuOpen = state.openPhraseMenuFor === entry.issue_id;
+  const menuOpen = PhraseMenu.isOpenFor(entry.issue_id);
 
   const defaultStar = hasDefault
     ? `<span class="entry-default-star" title="此 issue 已設 default — 勾入時自動套用">⭐</span>`
@@ -911,8 +972,7 @@ function bindTableEvents() {
     btn.addEventListener("click", (event) => {
       event.stopPropagation();
       const issueId = Number(event.currentTarget.dataset.issueId);
-      state.openPhraseMenuFor = state.openPhraseMenuFor === issueId ? null : issueId;
-      renderAll();
+      PhraseMenu.toggleFor(issueId);
     });
   }
   // Phrase menu: apply phrase item
@@ -926,8 +986,7 @@ function bindTableEvents() {
       if (!entry || !phrase) return;
       applyPhraseFields(phrase, entry);
       invalidatePreview(true);
-      state.openPhraseMenuFor = null;
-      renderAll();
+      PhraseMenu.close();
     });
   }
   // Phrase menu: toggle default (set / remove)
@@ -935,7 +994,7 @@ function bindTableEvents() {
     btn.addEventListener("click", async (event) => {
       event.stopPropagation();
       const issueId = Number(event.currentTarget.dataset.issueId);
-      state.openPhraseMenuFor = null;
+      PhraseMenu.close();
       try {
         await toggleIssueDefault(issueId);
       } catch (err) {
@@ -2018,32 +2077,7 @@ function renderAll() {
   updateDailyTotalBadge();
   updateSettingsTheme();
   persistState();
-  // Phrase menu popup 用 position: fixed, 需 JS 計算 button rect 設座標
-  if (state.openPhraseMenuFor !== null) {
-    requestAnimationFrame(positionPhraseMenuPopup);
-  }
-}
-
-// Phrase popup 用 fixed 跳出 .table-wrap overflow clip; renderAll 後重定位
-function positionPhraseMenuPopup() {
-  const popup = document.querySelector(".phrase-menu-popup");
-  if (!popup) return;
-  const wrap = popup.closest(".phrase-menu-wrap");
-  if (!wrap) return;
-  const btn = wrap.querySelector(".phrase-menu-button");
-  if (!btn) return;
-  const rect = btn.getBoundingClientRect();
-  const popupRect = popup.getBoundingClientRect();
-  // 預設: popup 右邊對齊 button 右邊, 在 button 下方
-  let top = rect.bottom + 4;
-  let right = window.innerWidth - rect.right;
-  // 若往下空間不夠 → 改向上開
-  if (top + popupRect.height > window.innerHeight - 8) {
-    top = rect.top - popupRect.height - 4;
-  }
-  popup.style.top = `${Math.max(8, top)}px`;
-  popup.style.right = `${Math.max(8, right)}px`;
-  popup.style.left = "auto";
+  PhraseMenu.afterRender();
 }
 
 let __batchRowUidCounter = 1;
@@ -2744,34 +2778,6 @@ elements.refreshButton.addEventListener("click", async () => {
     renderAll();
   } catch (error) {
     state.issueWarnings = [error.message || String(error)];
-    renderAll();
-  }
-});
-
-// Phrase menu: 點外部關閉 + ESC 關閉 (全域 listener 註冊一次)
-document.addEventListener("click", (event) => {
-  if (state.openPhraseMenuFor === null) return;
-  if (event.target.closest && event.target.closest("[data-phrase-menu]")) return;
-  state.openPhraseMenuFor = null;
-  renderAll();
-});
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && state.openPhraseMenuFor !== null) {
-    state.openPhraseMenuFor = null;
-    renderAll();
-  }
-});
-// Phrase popup 用 position: fixed, scroll/resize 時關閉以避免位置失效
-// capture: true 抓 nested scroll container (main-view / panel / table-wrap 都會 fire)
-window.addEventListener("scroll", () => {
-  if (state.openPhraseMenuFor !== null) {
-    state.openPhraseMenuFor = null;
-    renderAll();
-  }
-}, true);
-window.addEventListener("resize", () => {
-  if (state.openPhraseMenuFor !== null) {
-    state.openPhraseMenuFor = null;
     renderAll();
   }
 });
