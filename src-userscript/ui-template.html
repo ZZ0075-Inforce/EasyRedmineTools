@@ -1198,6 +1198,9 @@
         background: var(--panel); border: 1px solid var(--panel-border);
         border-radius: 14px; width: 100%; max-width: 400px;
         box-shadow: 0 12px 40px rgba(0,0,0,.22);
+        display: flex;
+        flex-direction: column;
+        max-height: calc(100vh - 32px);
       }
       .modal-header {
         display: flex; align-items: center; justify-content: space-between;
@@ -1210,7 +1213,12 @@
         padding: 2px 7px; border-radius: 4px;
       }
       .modal-x:hover { background: var(--subtle); }
-      .modal-body { padding: 16px 20px; }
+      .modal-body {
+        padding: 16px 20px;
+        flex: 1 1 auto;
+        min-height: 0;          /* 讓 flex child 能 shrink, overflow 才會生效 */
+        overflow-y: auto;
+      }
       .modal-date-row {
         display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
       }
@@ -1622,6 +1630,7 @@
 
       /* ─── Confirm modal: small box variant ──────────────────── */
       .modal-box-sm { max-width: 360px; }
+      .modal-box-md { max-width: 560px; }
       .confirm-modal-body {
         margin: 0;
         font-size: 14px;
@@ -2172,7 +2181,7 @@
     </button>
 
     <div id="ai-suggest-modal" class="modal-overlay" hidden aria-hidden="true">
-      <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="ai-suggest-modal-title">
+      <div class="modal-box modal-box-md" role="dialog" aria-modal="true" aria-labelledby="ai-suggest-modal-title">
         <div class="modal-header">
           <h3 id="ai-suggest-modal-title">✨ AI 建議 issue</h3>
           <button class="modal-x" id="ai-suggest-modal-close" aria-label="關閉">&times;</button>

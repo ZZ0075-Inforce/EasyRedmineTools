@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605280108
+// @version      1.0.202605280133
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -409,7 +409,7 @@ const APP_HTML = `<div class="pj-app-shell">
     </button>
 
     <div id="ai-suggest-modal" class="pj-modal-overlay" hidden aria-hidden="true">
-      <div class="pj-modal-box" role="dialog" aria-modal="true" aria-labelledby="ai-suggest-modal-title">
+      <div class="pj-modal-box pj-modal-box-md" role="dialog" aria-modal="true" aria-labelledby="ai-suggest-modal-title">
         <div class="pj-modal-header">
           <h3 id="ai-suggest-modal-title">✨ AI 建議 issue</h3>
           <button class="pj-modal-x" id="ai-suggest-modal-close" aria-label="關閉">&times;</button>
@@ -1300,6 +1300,9 @@ const APP_CSS = `#__worklog_root {
         background: var(--panel); border: 1px solid var(--panel-border);
         border-radius: 14px; width: 100%; max-width: 400px;
         box-shadow: 0 12px 40px rgba(0,0,0,.22);
+        display: flex;
+        flex-direction: column;
+        max-height: calc(100vh - 32px);
       }#__worklog_root .pj-modal-header {
         display: flex; align-items: center; justify-content: space-between;
         padding: 16px 20px 12px; border-bottom: 1px solid var(--panel-border);
@@ -1307,7 +1310,12 @@ const APP_CSS = `#__worklog_root {
         background: none; border: none; cursor: pointer;
         font-size: 18px; color: var(--muted); line-height: 1;
         padding: 2px 7px; border-radius: 4px;
-      }#__worklog_root .pj-modal-x:hover { background: var(--subtle); }#__worklog_root .pj-modal-body { padding: 16px 20px; }#__worklog_root .pj-modal-date-row {
+      }#__worklog_root .pj-modal-x:hover { background: var(--subtle); }#__worklog_root .pj-modal-body {
+        padding: 16px 20px;
+        flex: 1 1 auto;
+        min-height: 0;          
+        overflow-y: auto;
+      }#__worklog_root .pj-modal-date-row {
         display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
       }#__worklog_root .pj-modal-date-label { font-size: 13px; font-weight: 500; white-space: nowrap; }#__worklog_root .pj-modal-date-row input[type="date"] { flex: 1; }#__worklog_root .pj-modal-quick-dates { display: flex; gap: 6px; margin-bottom: 14px; }#__worklog_root .pj-modal-quick-dates button {
         flex: 1; padding: 5px 0; font-size: 12px;
@@ -1575,7 +1583,7 @@ const APP_CSS = `#__worklog_root {
           margin-bottom: 4px;
         }#__worklog_root .pj-hours-input { max-width: none; }#__worklog_root .pj-col-send, #__worklog_root .pj-col-hours, #__worklog_root .pj-col-activity, #__worklog_root .pj-col-comments, #__worklog_root .pj-col-check { width: auto; }#__worklog_root .pj-batch-meta { flex-direction: column; align-items: stretch; }#__worklog_root .pj-date-quick-buttons { width: 100%; }#__worklog_root .pj-date-quick-buttons .pj-quick-btn { flex: 1; text-align: center; }#__worklog_root .pj-details-panel { padding-bottom: 80px; }#__worklog_root .pj-action-button, #__worklog_root .pj-ghost-button, #__worklog_root .pj-danger-button { min-height: 44px; }#__worklog_root .pj-quick-btn { min-height: 40px; }#__worklog_root input[type="date"], #__worklog_root input[type="number"], #__worklog_root input[type="text"], #__worklog_root select { min-height: 44px; }
       }@media (min-width: 768px) {#__worklog_root .layout { grid-template-columns: 1fr 1.2fr; gap: 16px; }
-      }#__worklog_root .pj-modal-box-sm { max-width: 360px; }#__worklog_root .pj-confirm-modal-body {
+      }#__worklog_root .pj-modal-box-sm { max-width: 360px; }#__worklog_root .pj-modal-box-md { max-width: 560px; }#__worklog_root .pj-confirm-modal-body {
         margin: 0;
         font-size: 14px;
         color: var(--ink);
@@ -3729,8 +3737,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605280108";
-const APP_BUILD_TIME = "2026-05-28 01:08";
+const APP_VERSION = "1.0.202605280133";
+const APP_BUILD_TIME = "2026-05-28 01:33";
 
 const state = {
   localToday: localDateString(new Date()),
