@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605280314
+// @version      1.0.202605281125
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -2480,13 +2480,21 @@ const GeminiClient = (() => {
       throw new Error(`Gemini ${res.status}：${text.slice(0, 240)}`);
     }
     const data = await res.json();
-    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    // parts 可能有多個 (Gemma 4 / Gemini 2.5 thinking mode 會回 thought + output)
+    // 跳過 thought: true 的 part，取第一個真正 output 的
+    const parts = data?.candidates?.[0]?.content?.parts || [];
+    const outputPart = parts.find((p) => !p.thought) || parts[0];
+    const rawText = outputPart?.text || "";
     if (!rawText) throw new Error("Gemini 回應內容為空");
+    // Wrap fn: Gemma 未受 responseSchema 約束時會回純 array; 包成 {issues: arr}
+    // 以符合 AGENT_TYPES.parseResponse 對 data.issues 的期望。
+    // Gemini 回 object 形態時原樣返回，不影響行為。
+    const wrap = (v) => Array.isArray(v) ? { issues: v } : v;
     // Layer 1: 直接 parse
-    try { return JSON.parse(rawText); } catch (_) {}
+    try { return wrap(JSON.parse(rawText)); } catch (_) {}
     // Layer 2: 剝 markdown fence 再 parse (` ```json {...} ``` ` 樣式)
     const stripped = rawText.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
-    try { return JSON.parse(stripped); } catch (_) {}
+    try { return wrap(JSON.parse(stripped)); } catch (_) {}
     // Layer 3: partial recovery — 從 raw text 用 regex 抽 "subject"
     const subjects = [...stripped.matchAll(/"subject"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/g)]
       .map((m) => m[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\"))
@@ -3751,8 +3759,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605280314";
-const APP_BUILD_TIME = "2026-05-28 03:14";
+const APP_VERSION = "1.0.202605281125";
+const APP_BUILD_TIME = "2026-05-28 11:25";
 
 const state = {
   localToday: localDateString(new Date()),
