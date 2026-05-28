@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605281125
+// @version      1.0.202605281137
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -360,7 +360,7 @@ const APP_HTML = `<div class="pj-app-shell">
               <label class="pj-field-stack">
                 <span>Gemini API Key</span>
                 <input type="password" id="setting-gemini-api-key" placeholder="貼上 Google AI Studio 的 API Key" autocomplete="off">
-                <span class="muted">本地 GM 儲存，不外傳。所有 AI Agent 共用同一把 key。</span>
+                <span class="muted">本地 GM 儲存，不外傳。所有 AI Agent 共用同一把 key。<br>Key 透過 header 傳送（不在 URL），但本工具是 client 端 F12 仍可挖到，避免分享 key 給他人。</span>
               </label>
               <div id="setting-gemini-api-key-status" class="muted" style="font-size:13px; min-height:18px; margin-top:6px;"></div>
             </section>
@@ -2453,7 +2453,10 @@ const GeminiClient = (() => {
     const apiKey = (Store.get("gemini_api_key", "") || "").trim();
     if (!apiKey) throw new Error("尚未設定 Gemini API Key");
     if (!modelId) throw new Error("尚未指定模型");
-    const url = `${ENDPOINT_BASE}/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    // Key 改放 x-goog-api-key header，避免出現在 URL 內被 F12 Network /
+    // 截圖 / proxy log 一眼看見。F12 展 Request Headers 仍可看（client
+    // 端架構本質）。
+    const url = `${ENDPOINT_BASE}/${encodeURIComponent(modelId)}:generateContent`;
     const body = {
       contents: [{ role: "user", parts: [{ text: userInput }] }],
       generationConfig: {
@@ -2472,7 +2475,10 @@ const GeminiClient = (() => {
     }
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": apiKey,
+      },
       body: JSON.stringify(body),
     });
     if (!res.ok) {
@@ -3759,8 +3765,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605281125";
-const APP_BUILD_TIME = "2026-05-28 11:25";
+const APP_VERSION = "1.0.202605281137";
+const APP_BUILD_TIME = "2026-05-28 11:37";
 
 const state = {
   localToday: localDateString(new Date()),

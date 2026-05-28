@@ -267,7 +267,10 @@ const GeminiClient = (() => {
     const apiKey = (Store.get("gemini_api_key", "") || "").trim();
     if (!apiKey) throw new Error("尚未設定 Gemini API Key");
     if (!modelId) throw new Error("尚未指定模型");
-    const url = `${ENDPOINT_BASE}/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    // Key 改放 x-goog-api-key header，避免出現在 URL 內被 F12 Network /
+    // 截圖 / proxy log 一眼看見。F12 展 Request Headers 仍可看（client
+    // 端架構本質）。
+    const url = `${ENDPOINT_BASE}/${encodeURIComponent(modelId)}:generateContent`;
     const body = {
       contents: [{ role: "user", parts: [{ text: userInput }] }],
       generationConfig: {
@@ -286,7 +289,10 @@ const GeminiClient = (() => {
     }
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": apiKey,
+      },
       body: JSON.stringify(body),
     });
     if (!res.ok) {

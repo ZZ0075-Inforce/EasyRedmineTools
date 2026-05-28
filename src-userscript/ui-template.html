@@ -2132,7 +2132,7 @@
               <label class="field-stack">
                 <span>Gemini API Key</span>
                 <input type="password" id="setting-gemini-api-key" placeholder="貼上 Google AI Studio 的 API Key" autocomplete="off">
-                <span class="muted">本地 GM 儲存，不外傳。所有 AI Agent 共用同一把 key。</span>
+                <span class="muted">本地 GM 儲存，不外傳。所有 AI Agent 共用同一把 key。<br>Key 透過 header 傳送（不在 URL），但本工具是 client 端 F12 仍可挖到，避免分享 key 給他人。</span>
               </label>
               <div id="setting-gemini-api-key-status" class="muted" style="font-size:13px; min-height:18px; margin-top:6px;"></div>
             </section>
