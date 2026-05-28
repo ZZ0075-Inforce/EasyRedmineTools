@@ -109,6 +109,9 @@ Easy Redmine `/issues.json` 對 filter shorthand 不照辦——直接 `?assigne
 | `issue_templates` | Issue subject 模板列表（嵌在「批次建 issue」view 內，僅存 `{ id, subject }`） |
 | `visited_issues` | 近期查閱清單（保留 7 天，每次訪問 `/issues/{id}` 自動更新） |
 | `side_nav_collapsed` | sidebar 收合狀態（true/false） |
+| `gemini_api_key` | Gemini API 金鑰（全域，所有 AI Agent 共用） |
+| `ai_agent_settings` | 每個 AI Agent 的 sysprompt + model（per-view） |
+| `ai_history` | AI 建議歷程（最多 100 筆，7 天自動 prune） |
 
 ## API surface (內部 adapter，不對外)
 

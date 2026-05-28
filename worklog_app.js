@@ -914,9 +914,76 @@ const AISuggestModal = (() => {
     elements.aiSuggestResults.innerHTML = "";
     elements.aiSuggestApply.disabled = true;
     elements.aiSuggestGenerate.disabled = true;
+    switchTab("new");  // 預設「新生成」tab
     elements.aiSuggestModal.hidden = false;
     elements.aiSuggestModal.removeAttribute("aria-hidden");
     elements.aiSuggestRole.focus();
+  }
+
+  function switchTab(tabName) {
+    if (!elements.aiTabBar) return;
+    for (const btn of elements.aiTabBar.querySelectorAll("[data-ai-tab]")) {
+      btn.classList.toggle("active", btn.dataset.aiTab === tabName);
+    }
+    if (elements.aiTabPanelNew) elements.aiTabPanelNew.hidden = tabName !== "new";
+    if (elements.aiTabPanelHistory) elements.aiTabPanelHistory.hidden = tabName !== "history";
+    if (tabName === "history") renderHistory();
+  }
+
+  function renderHistory() {
+    if (!elements.aiHistoryList) return;
+    const entries = AIHistory.list();
+    if (!entries.length) {
+      elements.aiHistoryList.innerHTML = `<div class="ai-history-empty">尚無歷史紀錄。生成一次後會自動記下。</div>`;
+      return;
+    }
+    elements.aiHistoryList.innerHTML = entries.map((e) => {
+      const ts = new Date(e.ts);
+      const tsStr = `${ts.getFullYear()}-${String(ts.getMonth() + 1).padStart(2, "0")}-${String(ts.getDate()).padStart(2, "0")} ${String(ts.getHours()).padStart(2, "0")}:${String(ts.getMinutes()).padStart(2, "0")}`;
+      const taskPreview = (e.task || "").slice(0, 60) + ((e.task || "").length > 60 ? "…" : "");
+      const ctxPreview = e.context ? `${e.context.slice(0, 80)}${e.context.length > 80 ? "…" : ""}` : "";
+      const count = Array.isArray(e.suggestions) ? e.suggestions.length : 0;
+      return `
+        <div class="ai-history-item" data-ai-history-id="${escapeHtml(e.id)}">
+          <div class="ai-history-item-meta">${escapeHtml(tsStr)} · ${escapeHtml(e.role || "?")}</div>
+          <div class="ai-history-item-task">${escapeHtml(taskPreview)}</div>
+          ${ctxPreview ? `<div class="ai-history-item-context">背景：${escapeHtml(ctxPreview)}</div>` : ""}
+          <div class="ai-history-item-suggest-count">${count} 筆建議</div>
+        </div>
+      `;
+    }).join("");
+    for (const item of elements.aiHistoryList.querySelectorAll("[data-ai-history-id]")) {
+      item.addEventListener("click", () => loadHistoryEntry(item.dataset.aiHistoryId));
+    }
+  }
+
+  function loadHistoryEntry(entryId) {
+    const entry = AIHistory.list().find((e) => e.id === entryId);
+    if (!entry) {
+      showToast("找不到該歷史紀錄（可能已過期）", { type: "error" });
+      return;
+    }
+    currentAgentId = entry.agent || currentAgentId;
+    const type = AGENT_TYPES[currentAgentId];
+    if (type) {
+      populateRoleDropdown(type);
+      elements.aiSuggestAgentLabel.textContent = `Agent: ${type.label}`;
+    }
+    if (elements.aiSuggestRole) elements.aiSuggestRole.value = entry.role || "";
+    const roleObj = type && (type.roles || []).find((r) => r.code === entry.role);
+    elements.aiSuggestRoleDesc.textContent = roleObj
+      ? `${roleObj.label} — ${roleObj.desc}` : "";
+    elements.aiSuggestTask.value = entry.task || "";
+    elements.aiSuggestContext.value = entry.context || "";
+    suggestions = Array.isArray(entry.suggestions) ? entry.suggestions : [];
+    selectedIdx = new Set(suggestions.map((_, i) => i));  // 預設全勾
+    renderResults();
+    const ts = new Date(entry.ts);
+    const tsStr = `${ts.getMonth() + 1}/${ts.getDate()} ${String(ts.getHours()).padStart(2, "0")}:${String(ts.getMinutes()).padStart(2, "0")}`;
+    elements.aiSuggestStatus.textContent = `已載入 ${tsStr} 的歷史紀錄（${suggestions.length} 筆，全勾預設）`;
+    elements.aiSuggestApply.disabled = suggestions.length === 0;
+    syncGenerateEnabled();
+    switchTab("new");  // 切回「新生成」tab 看載入的 suggestions
   }
 
   function close() {
@@ -962,6 +1029,18 @@ const AISuggestModal = (() => {
       suggestions = items;
       selectedIdx = new Set(items.map((_, i) => i));  // 預設全勾
       renderResults();
+      // 寫入歷程（7 天保留，最多 100 筆）
+      try {
+        AIHistory.add({
+          agent: currentAgentId,
+          role,
+          task,
+          context,
+          suggestions: items,
+        });
+      } catch (e) {
+        console.warn("[AISuggest] failed to save history:", e);
+      }
       elements.aiSuggestStatus.textContent = `已產生 ${items.length} 筆建議（預設全勾，可取消不需要的）`;
       elements.aiSuggestApply.disabled = false;
     } catch (err) {
@@ -1061,6 +1140,27 @@ const AISuggestModal = (() => {
     // Task input: 同步 generate disabled
     if (elements.aiSuggestTask) {
       elements.aiSuggestTask.addEventListener("input", syncGenerateEnabled);
+    }
+    // Tab 切換
+    if (elements.aiTabBar) {
+      for (const btn of elements.aiTabBar.querySelectorAll("[data-ai-tab]")) {
+        btn.addEventListener("click", () => switchTab(btn.dataset.aiTab));
+      }
+    }
+    // 清空歷史
+    if (elements.aiHistoryClear) {
+      elements.aiHistoryClear.addEventListener("click", async () => {
+        const ok = await showConfirmModal({
+          title: "清空 AI 歷程",
+          body: "確定清空全部 AI 建議歷程？此操作無法復原。",
+          confirmText: "清空",
+          danger: true,
+        });
+        if (!ok) return;
+        AIHistory.clear();
+        renderHistory();
+        showToast("已清空 AI 歷程");
+      });
     }
   }
 
@@ -1304,6 +1404,11 @@ const elements = {
   aiSuggestStatus: document.getElementById("ai-suggest-status"),
   aiSuggestResults: document.getElementById("ai-suggest-results"),
   aiSuggestApply: document.getElementById("ai-suggest-apply"),
+  aiTabBar: document.querySelector("#ai-suggest-modal .ai-tab-bar"),
+  aiTabPanelNew: document.querySelector('#ai-suggest-modal [data-ai-tab-panel="new"]'),
+  aiTabPanelHistory: document.querySelector('#ai-suggest-modal [data-ai-tab-panel="history"]'),
+  aiHistoryList: document.getElementById("ai-history-list"),
+  aiHistoryClear: document.getElementById("ai-history-clear"),
 };
 
 /* ===== Toast：短暫操作反饋 (success / error / info)，自動消失 ============== */

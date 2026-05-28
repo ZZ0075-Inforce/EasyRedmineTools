@@ -1664,6 +1664,59 @@
         pointer-events: none;
       }
 
+      /* ─── AI Suggest Modal — tab bar + history list ───────────────── */
+      .ai-tab-bar {
+        display: flex; gap: 4px;
+        margin: 12px 0;
+        border-bottom: 1px solid var(--panel-border);
+      }
+      .ai-tab {
+        background: none; border: 0;
+        padding: 8px 12px; cursor: pointer;
+        color: var(--muted); font-size: 13px;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -1px;
+      }
+      .ai-tab:hover { color: var(--ink); }
+      .ai-tab.active {
+        color: var(--ink); font-weight: 600;
+        border-bottom-color: var(--accent);
+      }
+      .ai-tab-panel[hidden] { display: none; }
+      .ai-history-list { display: flex; flex-direction: column; gap: 8px; }
+      .ai-history-item {
+        border: 1px solid var(--panel-border);
+        border-radius: 8px;
+        padding: 10px 12px;
+        cursor: pointer;
+        background: var(--panel);
+      }
+      .ai-history-item:hover { background: var(--subtle); border-color: var(--accent); }
+      .ai-history-item-meta {
+        font-size: 12px; color: var(--muted);
+        margin-bottom: 4px;
+      }
+      .ai-history-item-task {
+        font-weight: 500;
+        font-size: 13px;
+        color: var(--ink);
+      }
+      .ai-history-item-context {
+        font-size: 12px; color: var(--muted);
+        margin-top: 4px;
+        overflow: hidden; text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .ai-history-item-suggest-count {
+        font-size: 12px; color: var(--muted);
+        margin-top: 4px;
+      }
+      .ai-history-empty {
+        text-align: center;
+        color: var(--muted);
+        padding: 24px;
+      }
+
       /* ─── 浮動 AI FAB（跨 view 固定右下角；依當前 view 啟用/停用） ───── */
       .ai-fab {
         position: absolute;
@@ -2188,26 +2241,37 @@
         </div>
         <div class="modal-body">
           <div class="muted" id="ai-suggest-agent-label">Agent: 批次建 issue Agent</div>
-          <label class="field-stack">
-            <span>角色 <span style="color:#e53">*</span></span>
-            <select id="ai-suggest-role">
-              <option value="">— 請選擇角色 —</option>
-            </select>
-            <span class="muted" id="ai-suggest-role-desc"></span>
-          </label>
-          <label class="field-stack" style="margin-top:12px;">
-            <span>任務 <span style="color:#e53">*</span></span>
-            <textarea id="ai-suggest-task" rows="3" placeholder="要做什麼？例如：建立會員登入流程"></textarea>
-          </label>
-          <label class="field-stack" style="margin-top:12px;">
-            <span>補充背景資訊（選填，協助 AI 拆 task）</span>
-            <textarea id="ai-suggest-context" rows="4" placeholder="例如：使用 OAuth2、要支援 Google + 公司 SSO、串現有 LDAP；前端用 Vue 3"></textarea>
-          </label>
-          <div class="ai-suggest-actions" style="margin-top:12px;">
-            <button type="button" class="btn btn-secondary" id="ai-suggest-generate" disabled>生成建議</button>
-            <span class="muted" id="ai-suggest-status"></span>
+          <div class="ai-tab-bar" role="tablist">
+            <button type="button" class="ai-tab active" data-ai-tab="new" role="tab">✨ 新生成</button>
+            <button type="button" class="ai-tab" data-ai-tab="history" role="tab">🕘 歷史紀錄</button>
           </div>
-          <div id="ai-suggest-results" class="ai-suggest-results"></div>
+          <div class="ai-tab-panel" data-ai-tab-panel="new">
+            <label class="field-stack">
+              <span>角色 <span style="color:#e53">*</span></span>
+              <select id="ai-suggest-role">
+                <option value="">— 請選擇角色 —</option>
+              </select>
+              <span class="muted" id="ai-suggest-role-desc"></span>
+            </label>
+            <label class="field-stack" style="margin-top:12px;">
+              <span>任務 <span style="color:#e53">*</span></span>
+              <textarea id="ai-suggest-task" rows="3" placeholder="要做什麼？例如：建立會員登入流程"></textarea>
+            </label>
+            <label class="field-stack" style="margin-top:12px;">
+              <span>補充背景資訊（選填，協助 AI 拆 task）</span>
+              <textarea id="ai-suggest-context" rows="4" placeholder="例如：使用 OAuth2、要支援 Google + 公司 SSO、串現有 LDAP；前端用 Vue 3"></textarea>
+            </label>
+            <div class="ai-suggest-actions" style="margin-top:12px;">
+              <button type="button" class="btn btn-secondary" id="ai-suggest-generate" disabled>生成建議</button>
+              <span class="muted" id="ai-suggest-status"></span>
+            </div>
+            <div id="ai-suggest-results" class="ai-suggest-results"></div>
+          </div>
+          <div class="ai-tab-panel" data-ai-tab-panel="history" hidden>
+            <div class="muted">最近 7 天的 AI 建議紀錄（最多 100 筆）。點任一筆載入，可重新勾選加入。</div>
+            <div id="ai-history-list" class="ai-history-list" style="margin-top:12px;"></div>
+            <button type="button" class="ghost-button" id="ai-history-clear" style="margin-top:12px;">清空全部</button>
+          </div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" id="ai-suggest-modal-cancel">取消</button>

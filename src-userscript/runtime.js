@@ -446,6 +446,56 @@ function randomToken() {
   return btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+/* ===== AIHistory：AI 建議歷程（7 天保留，最多 100 筆）======================
+ * GM key: ai_history = [{ id, ts, agent, role, task, context, suggestions }]
+ * - ts: ISO timestamp string (new Date().toISOString())
+ * - id: randomToken (給 list key 用，也支援將來刪除單筆)
+ * - 每次 list() / add() 自動 prune (過 7 天 + 超過 100 筆)
+ */
+const AIHistory = (() => {
+  const KEY = "ai_history";
+  const MAX_ENTRIES = 100;
+  const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+  function loadAll() {
+    const list = Store.get(KEY, []) || [];
+    return Array.isArray(list) ? list : [];
+  }
+
+  function pruneAndSave(list) {
+    const cutoff = Date.now() - RETENTION_MS;
+    const fresh = list
+      .filter((e) => e && e.ts && new Date(e.ts).getTime() >= cutoff)
+      .slice(0, MAX_ENTRIES);
+    Store.set(KEY, fresh);
+    return fresh;
+  }
+
+  function add({ agent, role, task, context, suggestions }) {
+    const list = loadAll();
+    list.unshift({
+      id: randomToken(),
+      ts: new Date().toISOString(),
+      agent,
+      role,
+      task,
+      context,
+      suggestions,
+    });
+    return pruneAndSave(list);
+  }
+
+  function list() {
+    return pruneAndSave(loadAll());
+  }
+
+  function clear() {
+    Store.set(KEY, []);
+  }
+
+  return { add, list, clear };
+})();
+
 /* ===== Handler map：4 個 domain module spread merge ======================= */
 const handlers = {
   ...TimeEntryHandlers,
