@@ -15,9 +15,11 @@
 """
 from __future__ import annotations
 
+import argparse
 import datetime
 import re
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).parent
@@ -351,7 +353,7 @@ def js_string(text: str) -> str:
     )
 
 
-def main() -> None:
+def build_once() -> None:
     # 版號每次 build 注入時間戳，確保 Tampermonkey 偵測到升版
     build_version = "1.0." + datetime.datetime.now().strftime("%Y%m%d%H%M")
     header = read(SRC / "header.meta.js")
@@ -491,6 +493,97 @@ def main() -> None:
     kb = out_path.stat().st_size / 1024
     sys.stdout.reconfigure(encoding="utf-8")
     print(f"[OK] 已輸出 {out_path} ({kb:.1f} KB) version={build_version}")
+
+    # 同步產出本機開發用 loader（@require file:// 指向上面的產物）
+    emit_dev_loader()
+
+
+def emit_dev_loader() -> None:
+    """產生 dist/dev-loader.user.js：只含 metadata 的本機開發 loader。
+
+    透過 @require file://<絕對路徑> 直接讀本機 dist/worklog.user.js，
+    搭配 Tampermonkey「外部 @require 更新間隔=總是」即可 build 完 F5 生效，
+    免 commit / push。@require 進來的檔案 metadata 不生效，故 @grant 在此重複宣告。
+    file:// URI 由 Path.as_uri() 產生，跨機器重 build 路徑自動正確。
+    """
+    header = read(SRC / "header.meta.js")
+
+    def pick(field: str) -> list[str]:
+        return re.findall(rf"^// @{field}\s+(.+?)\s*$", header, flags=re.MULTILINE)
+
+    require_uri = (DIST / "worklog.user.js").resolve().as_uri()
+    lines = ["// ==UserScript=="]
+    lines.append("// @name         LawPJ Worklog Helper (DEV loader)")
+    for ns in pick("namespace"):
+        lines.append(f"// @namespace    {ns}")
+    lines.append("// @version      0.0.0-dev")
+    lines.append("// @description  本機開發 loader：實際邏輯由 @require 的 dist/worklog.user.js 提供")
+    for m in pick("match"):
+        lines.append(f"// @match        {m}")
+    for g in pick("grant"):
+        lines.append(f"// @grant        {g}")
+    for r in pick("run-at"):
+        lines.append(f"// @run-at       {r}")
+    if re.search(r"^// @noframes\b", header, flags=re.MULTILINE):
+        lines.append("// @noframes")
+    lines.append(f"// @require      {require_uri}")
+    lines.append("// ==/UserScript==")
+    lines.append("")
+    lines.append("// loader：本檔不含邏輯，實際程式由上方 @require 的本機 dist/worklog.user.js 提供。")
+    lines.append("")
+
+    loader_path = DIST / "dev-loader.user.js"
+    loader_path.write_text("\n".join(lines), encoding="utf-8")
+    print(f"[OK] 已輸出 {loader_path}（@require {require_uri}）")
+
+
+def watch_paths() -> list[Path]:
+    """build 來源檔清單：src-userscript 下的 .js/.html + worklog_app.js + 本 build script。"""
+    paths = sorted(SRC.glob("*.js")) + sorted(SRC.glob("*.html"))
+    paths.append(ROOT / "worklog_app.js")
+    paths.append(Path(__file__).resolve())
+    return [p for p in paths if p.exists()]
+
+
+def watch_loop() -> None:
+    """polling 監看來源檔 mtime，有變動就重 build。Ctrl+C 結束。"""
+    sys.stdout.reconfigure(encoding="utf-8")
+    print("[watch] 監看來源檔變動中… (Ctrl+C 結束)")
+    last: dict[Path, float] = {}
+    for p in watch_paths():
+        last[p] = p.stat().st_mtime
+    while True:
+        try:
+            time.sleep(0.5)
+            changed = []
+            for p in watch_paths():
+                mtime = p.stat().st_mtime
+                if last.get(p) != mtime:
+                    last[p] = mtime
+                    changed.append(p.name)
+            if changed:
+                stamp = datetime.datetime.now().strftime("%H:%M:%S")
+                print(f"\n[watch {stamp}] 偵測到變動：{', '.join(changed)} → 重新 build")
+                try:
+                    build_once()
+                except Exception as exc:  # noqa: BLE001 — build 失敗不該中斷 watch
+                    print(f"[watch] build 失敗：{exc}")
+        except KeyboardInterrupt:
+            print("\n[watch] 結束。")
+            return
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Build LawPJ Tampermonkey userscript")
+    parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="監看來源檔變動，存檔自動重 build（配合 dev-loader + F5）",
+    )
+    args = parser.parse_args()
+    build_once()
+    if args.watch:
+        watch_loop()
 
 
 if __name__ == "__main__":

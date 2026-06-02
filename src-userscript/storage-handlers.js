@@ -7,6 +7,9 @@ function sanitizePhrase(raw) {
     hours: raw.hours ? String(raw.hours) : "",
     activity_id: raw.activity_id === "" || raw.activity_id == null ? "" : Number(raw.activity_id),
     comments: String(raw.comments || ""),
+    keywords: Array.isArray(raw.keywords)
+      ? raw.keywords.map((k) => String(k).trim()).filter(Boolean)
+      : String(raw.keywords || "").split(/[,，]/).map((k) => k.trim()).filter(Boolean),
   };
 }
 

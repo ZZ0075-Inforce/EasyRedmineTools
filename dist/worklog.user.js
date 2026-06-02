@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202605281154
+// @version      1.0.202606021408
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -155,6 +155,10 @@ const APP_HTML = `<div class="pj-app-shell">
           <div class="pj-view-head">
             <h2 class="pj-view-title">✏️ 工時模板</h2>
             <p class="muted">每筆工時卡片右上角的「快速填入」可一鍵套用模板。內容存在瀏覽器 GM 儲存。</p>
+            <label class="pj-keyword-match-toggle">
+              <input type="checkbox" id="phrase-keyword-match-toggle">
+              <span>勾選 issue 時依關鍵字自動套用模板</span>
+            </label>
           </div>
           <div class="pj-alert-stack" id="phrases-alert-stack"></div>
           <div class="pj-add-form">
@@ -175,6 +179,11 @@ const APP_HTML = `<div class="pj-app-shell">
             <label class="pj-field-stack">
               <span>預設備註 (選填)</span>
               <textarea id="phrase-comments-input"></textarea>
+            </label>
+            <label class="pj-field-stack">
+              <span>關鍵字 (選填，逗號分隔)</span>
+              <input type="text" id="phrase-keywords-input" placeholder="例：會議,開會,例會">
+              <small class="muted">填寫工時勾選 issue 時，標題含任一關鍵字即自動套用此模板</small>
             </label>
             <div>
               <button class="pj-action-button" id="phrase-add-button">儲存模板</button>
@@ -1426,7 +1435,28 @@ const APP_CSS = `#__worklog_root {
         font-size: 13px;
         cursor: help;
         opacity: 0.85;
-      }#__worklog_root .pj-entry-default-star:hover { opacity: 1; }#__worklog_root .pj-phrase-menu-wrap {
+      }#__worklog_root .pj-entry-default-star:hover { opacity: 1; }#__worklog_root .pj-entry-auto-phrase-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        margin-left: 8px;
+        padding: 1px 8px;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-size: 11px;
+        font-weight: 500;
+        white-space: nowrap;
+        cursor: help;
+      }#__worklog_root .pj-keyword-match-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 10px;
+        font-size: 13px;
+        color: var(--text);
+        cursor: pointer;
+      }#__worklog_root .pj-keyword-match-toggle input { cursor: pointer; }#__worklog_root .pj-phrase-menu-wrap {
         position: relative;
         display: inline-block;
         flex-shrink: 0;
@@ -2115,6 +2145,9 @@ function sanitizePhrase(raw) {
     hours: raw.hours ? String(raw.hours) : "",
     activity_id: raw.activity_id === "" || raw.activity_id == null ? "" : Number(raw.activity_id),
     comments: String(raw.comments || ""),
+    keywords: Array.isArray(raw.keywords)
+      ? raw.keywords.map((k) => String(k).trim()).filter(Boolean)
+      : String(raw.keywords || "").split(/[,，]/).map((k) => k.trim()).filter(Boolean),
   };
 }
 
@@ -3752,8 +3785,15 @@ function installInlineModal() {
   document.body.appendChild(modal);
 
   // 點 backdrop 關閉；ESC 關閉
-  modal.addEventListener("click", (e) => {
-    if (e.target === modal) modal.hidden = true;
+  // mousedown 與 mouseup 必須「都」落在 backdrop 上才關閉，避免在 box 內按下、
+  // 拖曳放開到 box 外（或反之）時誤觸關閉（click 的 target 是兩點共同祖先）。
+  let __downOnBackdrop = false;
+  modal.addEventListener("mousedown", (e) => {
+    __downOnBackdrop = e.target === modal;
+  });
+  modal.addEventListener("mouseup", (e) => {
+    if (__downOnBackdrop && e.target === modal) modal.hidden = true;
+    __downOnBackdrop = false;
   });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !modal.hidden) modal.hidden = true;
@@ -3864,8 +3904,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202605281154";
-const APP_BUILD_TIME = "2026-05-28 11:54";
+const APP_VERSION = "1.0.202606021408";
+const APP_BUILD_TIME = "2026-06-02 14:08";
 
 const state = {
   localToday: localDateString(new Date()),
@@ -5215,6 +5255,8 @@ const elements = {
   phraseHoursInput: document.getElementById("phrase-hours-input"),
   phraseActivityWrap: document.getElementById("phrase-activity-wrap"),
   phraseCommentsInput: document.getElementById("phrase-comments-input"),
+  phraseKeywordsInput: document.getElementById("phrase-keywords-input"),
+  phraseKeywordMatchToggle: document.getElementById("phrase-keyword-match-toggle"),
   phraseAddButton: document.getElementById("phrase-add-button"),
   phraseCancelButton: document.getElementById("phrase-cancel-button"),
   queryNameInput: document.getElementById("query-name-input"),
@@ -5508,6 +5550,7 @@ function buildDraftEntry(issueId, existing = null) {
     hours: existing?.hours || "",
     activity_id: existing?.activity_id || "",
     comments: existing?.comments || "",
+    auto_phrase_label: "",
     selected: true,
     errors: {},
     duplicate: false,
@@ -5523,7 +5566,16 @@ function upsertDraftEntry(issueId) {
   // 保留 user 既有 fields (含手動修改)，避免 select-all 覆蓋手改值。
   if (existingIndex < 0) {
     const snap = state.issueTemplateDefaults[issueId];
-    if (snap) applyPhraseFields(snap, nextEntry);
+    if (snap) {
+      applyPhraseFields(snap, nextEntry);
+    } else {
+      // per-issue default 優先；沒 pin 過才依關鍵字自動匹配模板
+      const kp = findKeywordPhrase(nextEntry.issue_subject);
+      if (kp) {
+        applyPhraseFields(kp, nextEntry);
+        nextEntry.auto_phrase_label = kp.label || "(未命名模板)";
+      }
+    }
   }
   if (existingIndex >= 0) {
     state.draftEntries[existingIndex] = nextEntry;
@@ -5983,6 +6035,7 @@ function renderRow(entry) {
               <span class="pj-entry-issue-id">#${entry.issue_id}</span>
               ${defaultStar}
               <span class="pj-entry-issue-label">${escapeHtml(issueLabel)}</span>
+              ${entry.auto_phrase_label ? `<span class="pj-entry-auto-phrase-chip" title="依關鍵字自動套用此模板">⚡ ${escapeHtml(entry.auto_phrase_label)}</span>` : ""}
               ${entry.issue_url ? `<a class="pj-entry-issue-link" href="${escapeHtml(entry.issue_url)}" target="_blank" rel="noreferrer">↗</a>` : ""}
             </div>
             ${phraseOptions}
@@ -6056,6 +6109,7 @@ function bindTableEvents() {
       const phrase = state.phrases.find((p) => p.id === phraseId);
       if (!entry || !phrase) return;
       applyPhraseFields(phrase, entry);
+      entry.auto_phrase_label = ""; // 使用者主動選了模板，清掉自動套用標記
       invalidatePreview(true);
       PhraseMenu.close();
     });
@@ -6284,6 +6338,7 @@ function phrasePresetLabel(phrase) {
 
 function renderPhrasesDrawer() {
   renderPhraseActivityField();
+  syncKeywordMatchToggle();
   if (!state.phrases.length) {
     elements.phrasesList.innerHTML = emptyStateHtml({
       icon: "✏️",
@@ -6305,6 +6360,7 @@ function renderPhrasesDrawer() {
           </div>
           <div class="pj-phrase-preset-row">${phrasePresetLabel(phrase)}</div>
           ${phrase.comments ? `<div class="pj-phrase-text">${escapeHtml(phrase.comments)}</div>` : ""}
+          ${(phrase.keywords && phrase.keywords.length) ? `<div class="pj-phrase-text muted">關鍵字：${escapeHtml(phrase.keywords.join("、"))}</div>` : ""}
         </div>
       `
     )
@@ -6373,6 +6429,7 @@ function startEditPhrase(phraseId) {
   elements.phraseHoursInput.value = phrase.hours || "";
   setPhraseActivityValue(phrase.activity_id || "");
   elements.phraseCommentsInput.value = phrase.comments || "";
+  elements.phraseKeywordsInput.value = (phrase.keywords || []).join(", ");
   elements.phraseAddButton.textContent = "儲存修改";
   elements.phraseCancelButton.style.display = "";
   elements.phraseCommentsInput.focus();
@@ -6384,6 +6441,7 @@ function resetPhraseForm() {
   elements.phraseHoursInput.value = "";
   setPhraseActivityValue("");
   elements.phraseCommentsInput.value = "";
+  elements.phraseKeywordsInput.value = "";
   elements.phraseAddButton.textContent = "儲存模板";
   elements.phraseCancelButton.style.display = "none";
 }
@@ -6395,6 +6453,32 @@ function applyPhraseFields(fields, entry) {
   if (fields.activity_id) entry.activity_id = fields.activity_id;
   if (fields.comments) entry.comments = fields.comments;
   clearEntryPreviewState(entry);
+}
+
+// 依關鍵字找出第一個命中的 phrase（子字串、任一命中、不分大小寫）。
+// 總開關關閉、標題為空、或無命中時回 null。依 state.phrases 陣列順序取首個命中。
+function findKeywordPhrase(subject) {
+  if (Store.get("phrase_keyword_match_enabled", true) === false) return null;
+  const s = String(subject || "").toLowerCase();
+  if (!s) return null;
+  return (
+    state.phrases.find((p) =>
+      (p.keywords || []).some((k) => k && s.includes(String(k).toLowerCase()))
+    ) || null
+  );
+}
+
+// 「工時模板」view 的關鍵字自動匹配總開關：同步 checkbox 狀態、綁定一次 change。
+function syncKeywordMatchToggle() {
+  const el = elements.phraseKeywordMatchToggle;
+  if (!el) return;
+  el.checked = Store.get("phrase_keyword_match_enabled", true) !== false;
+  if (!el.dataset.bound) {
+    el.dataset.bound = "1";
+    el.addEventListener("change", (event) => {
+      Store.set("phrase_keyword_match_enabled", event.target.checked);
+    });
+  }
 }
 
 // Toggle per-issue default：有就刪、沒就用 entry 當下 hours/activity/comments 設定快照。
@@ -7207,6 +7291,7 @@ function collectPhraseFormPayload() {
     hours: elements.phraseHoursInput.value.trim(),
     activity_id: activityInput ? activityInput.value.trim() : "",
     comments: elements.phraseCommentsInput.value.trim(),
+    keywords: elements.phraseKeywordsInput.value.trim(),
   };
 }
 

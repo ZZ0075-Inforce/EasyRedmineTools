@@ -33,6 +33,28 @@ python build-userscript.py
 node -e "new Function(require('fs').readFileSync('dist/worklog.user.js','utf8')); console.log('[OK]')"
 ```
 
+### 本機快速開發迴圈（dev loader，免 commit/push）
+
+正式 deploy 走 GitHub raw（`@updateURL`），改一行也要 commit→push→等 CDN cache，太慢。開發期改用本機 `@require file://` loader：build 完 F5 即生效，全程不碰 git。
+
+`build-userscript.py` 每次 build 會**順帶產出 `dist/dev-loader.user.js`**（已列入 `.gitignore`，含本機絕對路徑、不 commit）。它只有 metadata，用 `@require file:///…/dist/worklog.user.js` 直接讀本機產物。
+
+一次性設定：
+
+1. **Chrome**：`chrome://extensions` → Tampermonkey →「詳細資料」→ 開啟「**允許存取檔案網址 / Allow access to file URLs**」。
+2. **Tampermonkey**：設定 →「設定模式」切「進階」→ 把「**外部 @require/@resource 之間的更新間隔**」設為「**總是 / Always（0）**」（否則 file:// 內容被 cache，F5 看不到新版）。
+3. **安裝 loader**：跑一次 `python build-userscript.py`，把產出的 `dist/dev-loader.user.js` 拖進 Tampermonkey 安裝。**停用正式版那支**，避免雙重注入（頂部 menu 會出現兩個入口）。
+
+日常迴圈：
+
+```bash
+python build-userscript.py --watch
+```
+
+監看 `src-userscript/*.{js,html}` + `worklog_app.js` + 本 build script，存檔自動重 build；改 code 存檔 → 瀏覽器 F5 → 生效。Ctrl+C 結束。
+
+⚠️ **GM storage 不共用**：loader 與正式版是兩支不同 script，`api_key` / `phrases` / `visited_issues` 等 `GM_getValue` 資料各自獨立，開發期設的資料不會帶到正式版。
+
 ## Architecture
 
 ### 檔案責任

@@ -1360,6 +1360,32 @@
       }
       .entry-default-star:hover { opacity: 1; }
 
+      .entry-auto-phrase-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        margin-left: 8px;
+        padding: 1px 8px;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-size: 11px;
+        font-weight: 500;
+        white-space: nowrap;
+        cursor: help;
+      }
+
+      .keyword-match-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 10px;
+        font-size: 13px;
+        color: var(--text);
+        cursor: pointer;
+      }
+      .keyword-match-toggle input { cursor: pointer; }
+
       /* Custom phrase dropdown menu (replaces <select>) */
       .phrase-menu-wrap {
         position: relative;
@@ -1980,6 +2006,10 @@
           <div class="view-head">
             <h2 class="view-title">✏️ 工時模板</h2>
             <p class="muted">每筆工時卡片右上角的「快速填入」可一鍵套用模板。內容存在瀏覽器 GM 儲存。</p>
+            <label class="keyword-match-toggle">
+              <input type="checkbox" id="phrase-keyword-match-toggle">
+              <span>勾選 issue 時依關鍵字自動套用模板</span>
+            </label>
           </div>
           <div class="alert-stack" id="phrases-alert-stack"></div>
           <div class="add-form">
@@ -2000,6 +2030,11 @@
             <label class="field-stack">
               <span>預設備註 (選填)</span>
               <textarea id="phrase-comments-input"></textarea>
+            </label>
+            <label class="field-stack">
+              <span>關鍵字 (選填，逗號分隔)</span>
+              <input type="text" id="phrase-keywords-input" placeholder="例：會議,開會,例會">
+              <small class="muted">填寫工時勾選 issue 時，標題含任一關鍵字即自動套用此模板</small>
             </label>
             <div>
               <button class="action-button" id="phrase-add-button">儲存模板</button>

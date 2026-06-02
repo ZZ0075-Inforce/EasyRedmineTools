@@ -284,8 +284,15 @@ function installInlineModal() {
   document.body.appendChild(modal);
 
   // 點 backdrop 關閉；ESC 關閉
-  modal.addEventListener("click", (e) => {
-    if (e.target === modal) modal.hidden = true;
+  // mousedown 與 mouseup 必須「都」落在 backdrop 上才關閉，避免在 box 內按下、
+  // 拖曳放開到 box 外（或反之）時誤觸關閉（click 的 target 是兩點共同祖先）。
+  let __downOnBackdrop = false;
+  modal.addEventListener("mousedown", (e) => {
+    __downOnBackdrop = e.target === modal;
+  });
+  modal.addEventListener("mouseup", (e) => {
+    if (__downOnBackdrop && e.target === modal) modal.hidden = true;
+    __downOnBackdrop = false;
   });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !modal.hidden) modal.hidden = true;

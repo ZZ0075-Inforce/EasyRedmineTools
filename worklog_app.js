@@ -1350,6 +1350,8 @@ const elements = {
   phraseHoursInput: document.getElementById("phrase-hours-input"),
   phraseActivityWrap: document.getElementById("phrase-activity-wrap"),
   phraseCommentsInput: document.getElementById("phrase-comments-input"),
+  phraseKeywordsInput: document.getElementById("phrase-keywords-input"),
+  phraseKeywordMatchToggle: document.getElementById("phrase-keyword-match-toggle"),
   phraseAddButton: document.getElementById("phrase-add-button"),
   phraseCancelButton: document.getElementById("phrase-cancel-button"),
   queryNameInput: document.getElementById("query-name-input"),
@@ -1645,6 +1647,7 @@ function buildDraftEntry(issueId, existing = null) {
     hours: existing?.hours || "",
     activity_id: existing?.activity_id || "",
     comments: existing?.comments || "",
+    auto_phrase_label: "",
     selected: true,
     errors: {},
     duplicate: false,
@@ -1660,7 +1663,16 @@ function upsertDraftEntry(issueId) {
   // 保留 user 既有 fields (含手動修改)，避免 select-all 覆蓋手改值。
   if (existingIndex < 0) {
     const snap = state.issueTemplateDefaults[issueId];
-    if (snap) applyPhraseFields(snap, nextEntry);
+    if (snap) {
+      applyPhraseFields(snap, nextEntry);
+    } else {
+      // per-issue default 優先；沒 pin 過才依關鍵字自動匹配模板
+      const kp = findKeywordPhrase(nextEntry.issue_subject);
+      if (kp) {
+        applyPhraseFields(kp, nextEntry);
+        nextEntry.auto_phrase_label = kp.label || "(未命名模板)";
+      }
+    }
   }
   if (existingIndex >= 0) {
     state.draftEntries[existingIndex] = nextEntry;
@@ -2129,6 +2141,7 @@ function renderRow(entry) {
               <span class="entry-issue-id">#${entry.issue_id}</span>
               ${defaultStar}
               <span class="entry-issue-label">${escapeHtml(issueLabel)}</span>
+              ${entry.auto_phrase_label ? `<span class="entry-auto-phrase-chip" title="依關鍵字自動套用此模板">⚡ ${escapeHtml(entry.auto_phrase_label)}</span>` : ""}
               ${entry.issue_url ? `<a class="entry-issue-link" href="${escapeHtml(entry.issue_url)}" target="_blank" rel="noreferrer">↗</a>` : ""}
             </div>
             ${phraseOptions}
@@ -2202,6 +2215,7 @@ function bindTableEvents() {
       const phrase = state.phrases.find((p) => p.id === phraseId);
       if (!entry || !phrase) return;
       applyPhraseFields(phrase, entry);
+      entry.auto_phrase_label = ""; // 使用者主動選了模板，清掉自動套用標記
       invalidatePreview(true);
       PhraseMenu.close();
     });
@@ -2430,6 +2444,7 @@ function phrasePresetLabel(phrase) {
 
 function renderPhrasesDrawer() {
   renderPhraseActivityField();
+  syncKeywordMatchToggle();
   if (!state.phrases.length) {
     elements.phrasesList.innerHTML = emptyStateHtml({
       icon: "✏️",
@@ -2451,6 +2466,7 @@ function renderPhrasesDrawer() {
           </div>
           <div class="phrase-preset-row">${phrasePresetLabel(phrase)}</div>
           ${phrase.comments ? `<div class="phrase-text">${escapeHtml(phrase.comments)}</div>` : ""}
+          ${(phrase.keywords && phrase.keywords.length) ? `<div class="phrase-text muted">關鍵字：${escapeHtml(phrase.keywords.join("、"))}</div>` : ""}
         </div>
       `
     )
@@ -2519,6 +2535,7 @@ function startEditPhrase(phraseId) {
   elements.phraseHoursInput.value = phrase.hours || "";
   setPhraseActivityValue(phrase.activity_id || "");
   elements.phraseCommentsInput.value = phrase.comments || "";
+  elements.phraseKeywordsInput.value = (phrase.keywords || []).join(", ");
   elements.phraseAddButton.textContent = "儲存修改";
   elements.phraseCancelButton.style.display = "";
   elements.phraseCommentsInput.focus();
@@ -2530,6 +2547,7 @@ function resetPhraseForm() {
   elements.phraseHoursInput.value = "";
   setPhraseActivityValue("");
   elements.phraseCommentsInput.value = "";
+  elements.phraseKeywordsInput.value = "";
   elements.phraseAddButton.textContent = "儲存模板";
   elements.phraseCancelButton.style.display = "none";
 }
@@ -2541,6 +2559,32 @@ function applyPhraseFields(fields, entry) {
   if (fields.activity_id) entry.activity_id = fields.activity_id;
   if (fields.comments) entry.comments = fields.comments;
   clearEntryPreviewState(entry);
+}
+
+// 依關鍵字找出第一個命中的 phrase（子字串、任一命中、不分大小寫）。
+// 總開關關閉、標題為空、或無命中時回 null。依 state.phrases 陣列順序取首個命中。
+function findKeywordPhrase(subject) {
+  if (Store.get("phrase_keyword_match_enabled", true) === false) return null;
+  const s = String(subject || "").toLowerCase();
+  if (!s) return null;
+  return (
+    state.phrases.find((p) =>
+      (p.keywords || []).some((k) => k && s.includes(String(k).toLowerCase()))
+    ) || null
+  );
+}
+
+// 「工時模板」view 的關鍵字自動匹配總開關：同步 checkbox 狀態、綁定一次 change。
+function syncKeywordMatchToggle() {
+  const el = elements.phraseKeywordMatchToggle;
+  if (!el) return;
+  el.checked = Store.get("phrase_keyword_match_enabled", true) !== false;
+  if (!el.dataset.bound) {
+    el.dataset.bound = "1";
+    el.addEventListener("change", (event) => {
+      Store.set("phrase_keyword_match_enabled", event.target.checked);
+    });
+  }
 }
 
 // Toggle per-issue default：有就刪、沒就用 entry 當下 hours/activity/comments 設定快照。
@@ -3353,6 +3397,7 @@ function collectPhraseFormPayload() {
     hours: elements.phraseHoursInput.value.trim(),
     activity_id: activityInput ? activityInput.value.trim() : "",
     comments: elements.phraseCommentsInput.value.trim(),
+    keywords: elements.phraseKeywordsInput.value.trim(),
   };
 }
 
