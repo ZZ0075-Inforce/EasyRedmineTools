@@ -132,7 +132,12 @@ Easy Redmine `/issues.json` 對 filter shorthand 不照辦——直接 `?assigne
 | `visited_issues` | 近期查閱清單（保留 7 天，每次訪問 `/issues/{id}` 自動更新） |
 | `side_nav_collapsed` | sidebar 收合狀態（true/false） |
 | `gemini_api_key` | Gemini API 金鑰（全域，所有 AI Agent 共用） |
-| `ai_agent_settings` | 每個 AI Agent 的 sysprompt + model（per-view） |
+| `ai_provider` | AI 供應商：`gemini`（預設）\| `custom`（OpenAI 相容自架，如 CLIProxyAPI） |
+| `ai_custom_base_url` | 自訂供應商 Base URL（不含 /v1），預設 `http://localhost:8317` |
+| `ai_custom_api_key` | 自訂供應商 Bearer key（選填，供應商未設 api-keys 時可空） |
+| `ai_custom_models` | 上次 `GET /v1/models` 抓回的 model id 陣列（快取，給模型下拉用） |
+| `ai_default_model` | 全域預設模型（每供應商各一個）：`{ gemini?, custom? }`；Agent 沒覆寫時 fallback 到這裡 |
+| `ai_agent_settings` | 每個 AI Agent 的 sysprompt + model（per-view，model 空＝跟隨 `ai_default_model`） |
 | `ai_history` | AI 建議歷程（最多 100 筆，7 天自動 prune） |
 
 ## API surface (內部 adapter，不對外)
@@ -222,6 +227,10 @@ Easy Redmine `/issues.json` 對 filter shorthand 不照辦——直接 `?assigne
 13. **Issue 模板不獨立 view**：原本拆 `issue-templates` + `issue-batch` 兩個 sidebar 項目。實測 issue 模板 CRUD 跟批次建 issue 是同一個工作流（建模板就是為了用），分兩個 view 反而增加 navigation 成本。改成把模板 chip picker + 編輯/刪除按鈕 + inline add form 全部嵌在 `issue-batch` view 內，sidebar 只剩一個 `➕ 批次建 issue` 入口。`renderIssueTemplatesView` 已刪除，`renderBatchTemplatesPicker` 接管全部模板 UI。
 
 14. **batch-create 預帶 assignee 為本人**：Easy Redmine 部分 tracker 設定為 assignee 必填，POST `/issues.json` 不帶 `assigned_to_id` 會 422 「指派給不能為空元」。`POST /api/issues/batch-create` 用既有的 `getCurrentUserId()` 抓本人，無條件塞進每筆 issue payload。需要轉派時可在 Redmine UI 改派，這層用本人當預設值降低首次成功門檻。
+
+15. **AI 自訂供應商（OpenAI 相容）走 GM_xmlhttpRequest 而非 fetch**：頁面是 HTTPS，自訂供應商常是 `http://localhost:8317`（Docker 的 CLIProxyAPI）或區網 IP。純 `fetch` 從 HTTPS 頁打 `http://` 非 localhost host 會被 mixed-content 擋（Chrome 只豁免 localhost/127.0.0.1）。改走 `GM_xmlhttpRequest`（header 加 `@grant GM_xmlhttpRequest` + `@connect *`）同時繞過 mixed-content + CORS，不限 host；`gmRequestJson()` 在 grant 不存在時 fallback 純 fetch。`build-userscript.py` 的 `emit_dev_loader()` 的 `pick()` 原本沒搬 `@connect`，已補一行，否則 dev-loader 連線會被 Tampermonkey 擋。供應商路由：`AIClient.generate()` 依 `ai_provider` 切 `OpenAIClient`（`POST /v1/chat/completions`，`response_format: json_object` + schema 以文字附在 system message）或 `GeminiClient`；兩者共用抽出的 `extractJsonLoose()` 3 層 JSON 還原。模型下拉改用 `AIProvider.getModelOptions()`：custom 時來自 `GET /v1/models`（存 `ai_custom_models` 快取），保留「自訂模型 ID」文字框備援。供應商設定全域共用（Base URL / key / 模型清單），與既有「所有 Agent 共用一把 key」設計一致。
+
+16. **模型三層解析（全域預設 + per-agent 覆寫）**：原本模型只能 per-view 逐一選，沒設就用寫死的 `AGENT_TYPES[id].defaultModel`。改成 `AgentSettings.get().model` 依序解析：① per-agent 覆寫（`ai_agent_settings[id].model` 非空）→ ② 全域預設 `ai_default_model[provider]`（依當前供應商，設定頁可選）→ ③ 寫死 `defaultModel`。設定頁「AI 助手」tab 兩個供應商區塊各有一個「預設模型」下拉（Gemini 用 `AGENT_MODEL_OPTIONS`、自訂供應商用 `GET /v1/models` 載入後的清單），存進 `ai_default_model`。`get()` 額外回 `modelOverride`（原始覆寫值，""＝跟隨）供設定 UI 判斷；per-view 模型下拉首選項是「（跟隨全域預設：xxx）」value=""，選具體 model 或填自訂 ID 才算覆寫，存空值即跟隨。改全域預設會連動所有未覆寫的 Agent。`worklog_app.js` 用已解析的 `cfg.model`，不需更動。
 
 ## Known rough edges（已知粗糙處 / 未來可清理）
 

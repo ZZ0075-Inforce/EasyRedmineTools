@@ -905,9 +905,9 @@ const AISuggestModal = (() => {
       showToast("Unknown agent type: " + agentTypeId, { type: "error" });
       return;
     }
-    const apiKey = (Store.get("gemini_api_key", "") || "").trim();
-    if (!apiKey) {
-      showToast("請先到左下角「設定 → AI 助手」填 Gemini API Key", { type: "error" });
+    const cfgErr = (typeof AIProvider !== "undefined") ? AIProvider.configError() : null;
+    if (cfgErr) {
+      showToast(cfgErr, { type: "error" });
       return;
     }
     currentAgentId = agentTypeId;
@@ -1029,7 +1029,7 @@ const AISuggestModal = (() => {
     elements.aiSuggestStatus.textContent = "AI 生成中…";
     elements.aiSuggestResults.innerHTML = "";
     try {
-      const data = await GeminiClient.generate(cfg.model, cfg.sysprompt, userInput, type.outputSchema);
+      const data = await AIClient.generate(cfg.model, cfg.sysprompt, userInput, type.outputSchema);
       const items = type.parseResponse(data);
       if (!items.length) {
         elements.aiSuggestStatus.textContent = "AI 沒回任何建議，請調整任務描述或 sysprompt 再試";
@@ -1193,7 +1193,8 @@ const AIFab = (() => {
     } else {
       elements.aiFab.disabled = false;
       const type = AGENT_TYPES[agentId];
-      elements.aiFab.title = `✨ ${type.label}（呼叫 Gemini 產建議）`;
+      const providerName = (typeof AIProvider !== "undefined" && AIProvider.getProvider() === "custom") ? "自訂供應商" : "Gemini";
+      elements.aiFab.title = `✨ ${type.label}（呼叫 ${providerName} 產建議）`;
     }
     elements.aiFab.hidden = false;
   }

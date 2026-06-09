@@ -9,6 +9,8 @@
 // @grant        GM_setValue
 // @grant        GM_deleteValue
 // @grant        GM_addStyle
+// @grant        GM_xmlhttpRequest
+// @connect      *
 // @run-at       document-idle
 // @noframes
 // @updateURL    https://raw.githubusercontent.com/ZZ0075-Inforce/EasyRedmineTools/tampermonkey/dist/worklog.user.js

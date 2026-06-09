@@ -260,6 +260,65 @@ const CurrentUserManager = (() => {
  * 4. 從 candidates[0].content.parts[0].text 抽 JSON 字串並 parse
  * 失敗條件: 沒 API key / HTTP 非 2xx / parse 失敗 都 throw Error 帶說明。
  */
+
+/* ===== extractJsonLoose：把 LLM 回的文字盡力 parse 成 JSON ================
+ * 3 層還原：直接 parse → 剝 markdown fence → regex 抽 "subject" 救援。
+ * GeminiClient / OpenAIClient 共用（兩家都可能回非純 JSON）。
+ * 空回應 / 三層皆失敗 throw Error。label 用於錯誤訊息與 console 標記。
+ */
+function extractJsonLoose(rawText, label = "AI") {
+  if (!rawText) throw new Error(`${label} 回應內容為空`);
+  // Wrap fn: 未受 schema 約束時可能回純 array; 包成 {issues: arr}
+  // 以符合 AGENT_TYPES.parseResponse 對 data.issues 的期望。object 形態原樣返回。
+  const wrap = (v) => Array.isArray(v) ? { issues: v } : v;
+  // Layer 1: 直接 parse
+  try { return wrap(JSON.parse(rawText)); } catch (_) {}
+  // Layer 2: 剝 markdown fence 再 parse (` ```json {...} ``` ` 樣式)
+  const stripped = rawText.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
+  try { return wrap(JSON.parse(stripped)); } catch (_) {}
+  // Layer 3: partial recovery — 從 raw text 用 regex 抽 "subject"
+  const subjects = [...stripped.matchAll(/"subject"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/g)]
+    .map((m) => m[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\"))
+    .filter((s) => s && s.trim());
+  if (subjects.length) {
+    console.warn(`[${label}] JSON parse failed, partial recovery extracted`,
+      subjects.length, "subjects from raw:", rawText.slice(0, 200));
+    return { issues: subjects.map((s) => ({ subject: s })) };
+  }
+  throw new Error(`${label} 回應不是 JSON 也無法 partial recovery：` + rawText.slice(0, 160));
+}
+
+/* ===== gmRequestJson：外部 API 呼叫（自訂供應商用）========================
+ * 走 GM_xmlhttpRequest 同時繞過 mixed-content + CORS（不限 host）；
+ * GM_xmlhttpRequest 不可用時 fallback fetch（僅 localhost / 開 CORS 的 host 可成）。
+ * 非 2xx / 連線失敗 / 逾時都 reject 帶中文說明。
+ */
+function gmRequestJson(url, { method = "GET", headers = {}, body = null } = {}) {
+  return new Promise((resolve, reject) => {
+    const parseOk = (status, text) => {
+      if (status < 200 || status >= 300) {
+        reject(new Error(`HTTP ${status}：${(text || "").slice(0, 240)}`));
+        return;
+      }
+      try { resolve(JSON.parse(text)); }
+      catch (_) { reject(new Error("回應非 JSON：" + (text || "").slice(0, 160))); }
+    };
+    if (typeof GM_xmlhttpRequest === "function") {
+      GM_xmlhttpRequest({
+        method, url, headers, data: body, timeout: 30000,
+        onload: (resp) => parseOk(resp.status, resp.responseText),
+        onerror: () => reject(new Error("連線失敗（檢查 Base URL／CLIProxyAPI 是否啟動／@connect 權限）")),
+        ontimeout: () => reject(new Error("連線逾時（30 秒）")),
+      });
+      return;
+    }
+    // fallback：純 fetch（HTTPS 頁僅 localhost 或有開 CORS 的 host 可成功）
+    fetch(url, { method, headers, body })
+      .then(async (r) => parseOk(r.status, await r.text()))
+      .catch((e) => reject(new Error("連線失敗：" + (e && e.message ? e.message : String(e)))));
+  });
+}
+
 const GeminiClient = (() => {
   const ENDPOINT_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
@@ -305,26 +364,8 @@ const GeminiClient = (() => {
     const parts = data?.candidates?.[0]?.content?.parts || [];
     const outputPart = parts.find((p) => !p.thought) || parts[0];
     const rawText = outputPart?.text || "";
-    if (!rawText) throw new Error("Gemini 回應內容為空");
-    // Wrap fn: Gemma 未受 responseSchema 約束時會回純 array; 包成 {issues: arr}
-    // 以符合 AGENT_TYPES.parseResponse 對 data.issues 的期望。
-    // Gemini 回 object 形態時原樣返回，不影響行為。
-    const wrap = (v) => Array.isArray(v) ? { issues: v } : v;
-    // Layer 1: 直接 parse
-    try { return wrap(JSON.parse(rawText)); } catch (_) {}
-    // Layer 2: 剝 markdown fence 再 parse (` ```json {...} ``` ` 樣式)
-    const stripped = rawText.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
-    try { return wrap(JSON.parse(stripped)); } catch (_) {}
-    // Layer 3: partial recovery — 從 raw text 用 regex 抽 "subject"
-    const subjects = [...stripped.matchAll(/"subject"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/g)]
-      .map((m) => m[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\"))
-      .filter((s) => s && s.trim());
-    if (subjects.length) {
-      console.warn("[GeminiClient] JSON parse failed, partial recovery extracted",
-        subjects.length, "subjects from raw:", rawText.slice(0, 200));
-      return { issues: subjects.map((s) => ({ subject: s })) };
-    }
-    throw new Error("Gemini 回應不是 JSON 也無法 partial recovery：" + rawText.slice(0, 160));
+    // 3 層 JSON 還原（直接 parse → 剝 fence → regex 救援）抽到共用 extractJsonLoose
+    return extractJsonLoose(rawText, "Gemini");
   }
 
   return { generate };
@@ -403,6 +444,126 @@ const AGENT_MODEL_OPTIONS = [
   "gemini-2.5-flash",
 ];
 
+/* ===== AIProvider：供應商設定（全域，所有 Agent 共用）======================
+ * GM keys:
+ *  - ai_provider:        "gemini" | "custom"（預設 gemini）
+ *  - ai_custom_base_url: 自訂供應商 Base URL（OpenAI 相容，如 Docker 的 CLIProxyAPI）
+ *  - ai_custom_api_key:  Bearer key（選填，CLIProxyAPI 未設 api-keys 時可免）
+ *  - ai_custom_models:   上次 GET /v1/models 抓到的 model id 陣列（快取，給下拉用）
+ * getModelOptions() 依當前 provider 回模型下拉來源；loadModels() 動態抓 /v1/models。
+ */
+const DEFAULT_CUSTOM_BASE_URL = "http://localhost:8317";
+
+const AIProvider = (() => {
+  function getProvider() {
+    return Store.get("ai_provider", "gemini") === "custom" ? "custom" : "gemini";
+  }
+  function getCustomConfig() {
+    return {
+      baseUrl: (Store.get("ai_custom_base_url", "") || "").trim(),
+      apiKey: (Store.get("ai_custom_api_key", "") || "").trim(),
+    };
+  }
+  function getCustomModels() {
+    const list = Store.get("ai_custom_models", []);
+    return Array.isArray(list) ? list.filter((m) => typeof m === "string" && m) : [];
+  }
+  // 模型下拉來源：custom 用抓回來的清單，gemini 用寫死的 AGENT_MODEL_OPTIONS
+  function getModelOptions() {
+    return getProvider() === "custom" ? getCustomModels() : (AGENT_MODEL_OPTIONS || []);
+  }
+  // 動態抓 /v1/models（OpenAI 格式 {data:[{id}]}），存快取並回 id 陣列
+  async function loadModels() {
+    const { baseUrl, apiKey } = getCustomConfig();
+    if (!baseUrl) throw new Error("尚未設定自訂供應商 Base URL");
+    const url = baseUrl.replace(/\/+$/, "") + "/v1/models";
+    const headers = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+    const data = await gmRequestJson(url, { headers });
+    const ids = Array.isArray(data && data.data)
+      ? data.data.map((m) => m && m.id).filter((id) => typeof id === "string" && id)
+      : [];
+    Store.set("ai_custom_models", ids);
+    return ids;
+  }
+  // modal 開啟前預檢：設定不全時回中文錯誤字串，否則回 null
+  function configError() {
+    if (getProvider() === "custom") {
+      return getCustomConfig().baseUrl
+        ? null
+        : "請先到左下角「設定 → AI 助手」設定自訂供應商 Base URL";
+    }
+    return (Store.get("gemini_api_key", "") || "").trim()
+      ? null
+      : "請先到左下角「設定 → AI 助手」填 Gemini API Key";
+  }
+  // 全域預設模型（每供應商各一個）：ai_default_model = { gemini?, custom? }
+  // AgentSettings.get() 在 per-agent 沒覆寫時 fallback 到這裡。
+  function getDefaultModel(provider) {
+    const all = Store.get("ai_default_model", {}) || {};
+    const v = all[provider || getProvider()];
+    return typeof v === "string" ? v : "";
+  }
+  function setDefaultModel(provider, model) {
+    const all = Store.get("ai_default_model", {}) || {};
+    all[provider || getProvider()] = model || "";
+    Store.set("ai_default_model", all);
+  }
+  return {
+    getProvider, getCustomConfig, getCustomModels, getModelOptions, loadModels, configError,
+    getDefaultModel, setDefaultModel,
+  };
+})();
+
+/* ===== OpenAIClient：OpenAI 相容 /v1/chat/completions（自訂供應商）========
+ * 簽章與 GeminiClient.generate 相同，供 AIClient 路由切換。
+ * OpenAI 不吃 Gemini responseSchema → 把 schema 以文字附在 system message 尾，
+ * 並用 response_format:{type:"json_object"} 要求 JSON；回應沿用 extractJsonLoose。
+ */
+const OpenAIClient = (() => {
+  async function generate(modelId, sysprompt, userInput, responseSchema) {
+    const { baseUrl, apiKey } = AIProvider.getCustomConfig();
+    if (!baseUrl) throw new Error("尚未設定自訂供應商 Base URL");
+    if (!modelId) throw new Error("尚未指定模型");
+    let system = (sysprompt || "").trim();
+    if (responseSchema) {
+      system += (system ? "\n\n" : "") +
+        "請嚴格只輸出符合此 JSON Schema 的 JSON（不要任何多餘文字或 markdown）：\n" +
+        JSON.stringify(responseSchema);
+    }
+    const messages = [];
+    if (system) messages.push({ role: "system", content: system });
+    messages.push({ role: "user", content: userInput });
+    const body = {
+      model: modelId,
+      messages,
+      response_format: { type: "json_object" },
+      max_tokens: 8192,
+    };
+    const headers = { "Content-Type": "application/json" };
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+    const url = baseUrl.replace(/\/+$/, "") + "/v1/chat/completions";
+    const data = await gmRequestJson(url, { method: "POST", headers, body: JSON.stringify(body) });
+    const rawText = data && data.choices && data.choices[0] && data.choices[0].message
+      ? (data.choices[0].message.content || "")
+      : "";
+    return extractJsonLoose(rawText, "自訂供應商");
+  }
+  return { generate };
+})();
+
+/* ===== AIClient：依 ai_provider 路由到 OpenAIClient 或 GeminiClient ========= */
+const AIClient = (() => {
+  function generate(modelId, sysprompt, userInput, responseSchema) {
+    return AIProvider.getProvider() === "custom"
+      ? OpenAIClient.generate(modelId, sysprompt, userInput, responseSchema)
+      : GeminiClient.generate(modelId, sysprompt, userInput, responseSchema);
+  }
+  return { generate };
+})();
+
+window.__worklog_AIProvider = AIProvider;
+window.__worklog_AIClient = AIClient;
+
 /* ===== AgentSettings：每個 agent 的 sysprompt + model 持久化 ===============
  * GM key: ai_agent_settings = { [agentTypeId]: { sysprompt, model } }
  * 沒設定的 agent 用 AGENT_TYPES[id].default*。
@@ -418,9 +579,13 @@ const AgentSettings = (() => {
     const type = AGENT_TYPES[agentTypeId];
     if (!type) throw new Error(`unknown agent type: ${agentTypeId}`);
     const saved = loadAll()[agentTypeId] || {};
+    // 模型三層解析：per-agent 覆寫 → 全域預設(ai_default_model[provider]) → 寫死 defaultModel
+    const override = (typeof saved.model === "string" && saved.model) ? saved.model : "";
+    const def = (typeof AIProvider !== "undefined" && AIProvider.getDefaultModel()) || "";
     return {
       sysprompt: typeof saved.sysprompt === "string" ? saved.sysprompt : type.defaultSysprompt,
-      model: typeof saved.model === "string" && saved.model ? saved.model : type.defaultModel,
+      model: override || def || type.defaultModel,  // 解析後實際使用的 model
+      modelOverride: override,                       // 原始覆寫值（""=跟隨全域預設，給設定 UI 判斷）
     };
   }
 

@@ -2248,13 +2248,60 @@
             </section>
 
             <section class="settings-group" data-settings-section="ai">
-              <div class="settings-group-hint">Gemini AI 助手全域設定。每個功能 view 的 Agent sysprompt 跟模型在各功能 tab 內。</div>
+              <div class="settings-group-hint">AI 助手全域設定。每個功能 view 的 Agent sysprompt 跟模型在各功能 tab 內。</div>
               <label class="field-stack">
-                <span>Gemini API Key</span>
-                <input type="password" id="setting-gemini-api-key" placeholder="貼上 Google AI Studio 的 API Key" autocomplete="off">
-                <span class="muted">本地 GM 儲存，不外傳。所有 AI Agent 共用同一把 key。<br>Key 透過 header 傳送（不在 URL），但本工具是 client 端 F12 仍可挖到，避免分享 key 給他人。</span>
+                <span>供應商</span>
+                <select id="setting-ai-provider">
+                  <option value="gemini">Gemini（Google）</option>
+                  <option value="custom">自訂供應商（OpenAI 相容 / CLIProxyAPI）</option>
+                </select>
+                <span class="muted">切換 AI 後端。Gemini 直連 Google；自訂供應商可指向自架的 OpenAI 相容 API。</span>
               </label>
-              <div id="setting-gemini-api-key-status" class="muted" style="font-size:13px; min-height:18px; margin-top:6px;"></div>
+
+              <div id="ai-provider-gemini" style="margin-top:16px;">
+                <label class="field-stack">
+                  <span>Gemini API Key</span>
+                  <input type="password" id="setting-gemini-api-key" placeholder="貼上 Google AI Studio 的 API Key" autocomplete="off">
+                  <span class="muted">本地 GM 儲存，不外傳。所有 AI Agent 共用同一把 key。<br>Key 透過 header 傳送（不在 URL），但本工具是 client 端 F12 仍可挖到，避免分享 key 給他人。</span>
+                </label>
+                <div id="setting-gemini-api-key-status" class="muted" style="font-size:13px; min-height:18px; margin-top:6px;"></div>
+                <label class="field-stack" style="margin-top:12px;">
+                  <span>預設模型</span>
+                  <select id="setting-ai-gemini-default-model"></select>
+                </label>
+                <label class="field-stack" style="margin-top:8px;">
+                  <span>自訂模型 ID（覆寫上方選擇，可留空）</span>
+                  <input type="text" id="setting-ai-gemini-default-custom" placeholder="例如 gemini-2.5-pro" autocomplete="off">
+                </label>
+                <span class="muted" style="display:block; margin-top:6px;">所有 AI 功能預設用這個模型；個別功能可在各功能 tab 的「AI Agent 設定」覆寫。</span>
+              </div>
+
+              <div id="ai-provider-custom" hidden style="margin-top:16px;">
+                <label class="field-stack">
+                  <span>Base URL</span>
+                  <input type="text" id="setting-ai-custom-base-url" placeholder="http://localhost:8317" autocomplete="off">
+                  <span class="muted">OpenAI 相容端點根網址（不含 /v1）。例如 Docker 跑的 CLIProxyAPI 預設 http://localhost:8317。</span>
+                </label>
+                <label class="field-stack" style="margin-top:12px;">
+                  <span>API Key（選填）</span>
+                  <input type="password" id="setting-ai-custom-api-key" placeholder="供應商若有設 api-keys 才需填" autocomplete="off">
+                  <span class="muted">以 Authorization: Bearer 傳送。CLIProxyAPI 未設 api-keys 時可留空。</span>
+                </label>
+                <div style="display:flex; gap:8px; align-items:center; margin-top:12px;">
+                  <button type="button" class="action-button" id="setting-ai-load-models">載入模型清單</button>
+                  <span class="muted" id="setting-ai-models-status" style="font-size:13px;"></span>
+                </div>
+                <span class="muted" style="display:block; margin-top:8px;">按「載入模型清單」會打 GET /v1/models 取得可用模型，填入下方「預設模型」與各功能 Agent 的「模型」下拉。首次連線時 Tampermonkey 會跳一次性連線授權，請按允許。</span>
+                <label class="field-stack" style="margin-top:12px;">
+                  <span>預設模型</span>
+                  <select id="setting-ai-custom-default-model"></select>
+                </label>
+                <label class="field-stack" style="margin-top:8px;">
+                  <span>自訂模型 ID（覆寫上方選擇，可留空）</span>
+                  <input type="text" id="setting-ai-custom-default-custom" placeholder="清單外的 model id 可手打" autocomplete="off">
+                </label>
+                <span class="muted" style="display:block; margin-top:6px;">所有 AI 功能預設用這個模型；個別功能可在各功能 tab 的「AI Agent 設定」覆寫。</span>
+              </div>
             </section>
 
             <section class="settings-group" data-settings-section="about">

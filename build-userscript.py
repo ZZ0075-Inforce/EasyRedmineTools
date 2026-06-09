@@ -522,6 +522,8 @@ def emit_dev_loader() -> None:
         lines.append(f"// @match        {m}")
     for g in pick("grant"):
         lines.append(f"// @grant        {g}")
+    for c in pick("connect"):
+        lines.append(f"// @connect      {c}")
     for r in pick("run-at"):
         lines.append(f"// @run-at       {r}")
     if re.search(r"^// @noframes\b", header, flags=re.MULTILINE):

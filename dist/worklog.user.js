@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202606092206
+// @version      1.0.202606092253
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -9,6 +9,8 @@
 // @grant        GM_setValue
 // @grant        GM_deleteValue
 // @grant        GM_addStyle
+// @grant        GM_xmlhttpRequest
+// @connect      *
 // @run-at       document-idle
 // @noframes
 // @updateURL    https://raw.githubusercontent.com/ZZ0075-Inforce/EasyRedmineTools/tampermonkey/dist/worklog.user.js
@@ -365,13 +367,60 @@ const APP_HTML = `<div class="pj-app-shell">
             </section>
 
             <section class="pj-settings-group" data-settings-section="ai">
-              <div class="pj-settings-group-hint">Gemini AI 助手全域設定。每個功能 view 的 Agent sysprompt 跟模型在各功能 tab 內。</div>
+              <div class="pj-settings-group-hint">AI 助手全域設定。每個功能 view 的 Agent sysprompt 跟模型在各功能 tab 內。</div>
               <label class="pj-field-stack">
-                <span>Gemini API Key</span>
-                <input type="password" id="setting-gemini-api-key" placeholder="貼上 Google AI Studio 的 API Key" autocomplete="off">
-                <span class="muted">本地 GM 儲存，不外傳。所有 AI Agent 共用同一把 key。<br>Key 透過 header 傳送（不在 URL），但本工具是 client 端 F12 仍可挖到，避免分享 key 給他人。</span>
+                <span>供應商</span>
+                <select id="setting-ai-provider">
+                  <option value="gemini">Gemini（Google）</option>
+                  <option value="custom">自訂供應商（OpenAI 相容 / CLIProxyAPI）</option>
+                </select>
+                <span class="muted">切換 AI 後端。Gemini 直連 Google；自訂供應商可指向自架的 OpenAI 相容 API。</span>
               </label>
-              <div id="setting-gemini-api-key-status" class="muted" style="font-size:13px; min-height:18px; margin-top:6px;"></div>
+
+              <div id="ai-provider-gemini" style="margin-top:16px;">
+                <label class="pj-field-stack">
+                  <span>Gemini API Key</span>
+                  <input type="password" id="setting-gemini-api-key" placeholder="貼上 Google AI Studio 的 API Key" autocomplete="off">
+                  <span class="muted">本地 GM 儲存，不外傳。所有 AI Agent 共用同一把 key。<br>Key 透過 header 傳送（不在 URL），但本工具是 client 端 F12 仍可挖到，避免分享 key 給他人。</span>
+                </label>
+                <div id="setting-gemini-api-key-status" class="muted" style="font-size:13px; min-height:18px; margin-top:6px;"></div>
+                <label class="pj-field-stack" style="margin-top:12px;">
+                  <span>預設模型</span>
+                  <select id="setting-ai-gemini-default-model"></select>
+                </label>
+                <label class="pj-field-stack" style="margin-top:8px;">
+                  <span>自訂模型 ID（覆寫上方選擇，可留空）</span>
+                  <input type="text" id="setting-ai-gemini-default-custom" placeholder="例如 gemini-2.5-pro" autocomplete="off">
+                </label>
+                <span class="muted" style="display:block; margin-top:6px;">所有 AI 功能預設用這個模型；個別功能可在各功能 tab 的「AI Agent 設定」覆寫。</span>
+              </div>
+
+              <div id="ai-provider-custom" hidden style="margin-top:16px;">
+                <label class="pj-field-stack">
+                  <span>Base URL</span>
+                  <input type="text" id="setting-ai-custom-base-url" placeholder="http://localhost:8317" autocomplete="off">
+                  <span class="muted">OpenAI 相容端點根網址（不含 /v1）。例如 Docker 跑的 CLIProxyAPI 預設 http://localhost:8317。</span>
+                </label>
+                <label class="pj-field-stack" style="margin-top:12px;">
+                  <span>API Key（選填）</span>
+                  <input type="password" id="setting-ai-custom-api-key" placeholder="供應商若有設 api-keys 才需填" autocomplete="off">
+                  <span class="muted">以 Authorization: Bearer 傳送。CLIProxyAPI 未設 api-keys 時可留空。</span>
+                </label>
+                <div style="display:flex; gap:8px; align-items:center; margin-top:12px;">
+                  <button type="button" class="pj-action-button" id="setting-ai-load-models">載入模型清單</button>
+                  <span class="muted" id="setting-ai-models-status" style="font-size:13px;"></span>
+                </div>
+                <span class="muted" style="display:block; margin-top:8px;">按「載入模型清單」會打 GET /v1/models 取得可用模型，填入下方「預設模型」與各功能 Agent 的「模型」下拉。首次連線時 Tampermonkey 會跳一次性連線授權，請按允許。</span>
+                <label class="pj-field-stack" style="margin-top:12px;">
+                  <span>預設模型</span>
+                  <select id="setting-ai-custom-default-model"></select>
+                </label>
+                <label class="pj-field-stack" style="margin-top:8px;">
+                  <span>自訂模型 ID（覆寫上方選擇，可留空）</span>
+                  <input type="text" id="setting-ai-custom-default-custom" placeholder="清單外的 model id 可手打" autocomplete="off">
+                </label>
+                <span class="muted" style="display:block; margin-top:6px;">所有 AI 功能預設用這個模型；個別功能可在各功能 tab 的「AI Agent 設定」覆寫。</span>
+              </div>
             </section>
 
             <section class="pj-settings-group" data-settings-section="about">
@@ -2552,6 +2601,65 @@ const CurrentUserManager = (() => {
  * 4. 從 candidates[0].content.parts[0].text 抽 JSON 字串並 parse
  * 失敗條件: 沒 API key / HTTP 非 2xx / parse 失敗 都 throw Error 帶說明。
  */
+
+/* ===== extractJsonLoose：把 LLM 回的文字盡力 parse 成 JSON ================
+ * 3 層還原：直接 parse → 剝 markdown fence → regex 抽 "subject" 救援。
+ * GeminiClient / OpenAIClient 共用（兩家都可能回非純 JSON）。
+ * 空回應 / 三層皆失敗 throw Error。label 用於錯誤訊息與 console 標記。
+ */
+function extractJsonLoose(rawText, label = "AI") {
+  if (!rawText) throw new Error(`${label} 回應內容為空`);
+  // Wrap fn: 未受 schema 約束時可能回純 array; 包成 {issues: arr}
+  // 以符合 AGENT_TYPES.parseResponse 對 data.issues 的期望。object 形態原樣返回。
+  const wrap = (v) => Array.isArray(v) ? { issues: v } : v;
+  // Layer 1: 直接 parse
+  try { return wrap(JSON.parse(rawText)); } catch (_) {}
+  // Layer 2: 剝 markdown fence 再 parse (` ```json {...} ``` ` 樣式)
+  const stripped = rawText.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
+  try { return wrap(JSON.parse(stripped)); } catch (_) {}
+  // Layer 3: partial recovery — 從 raw text 用 regex 抽 "subject"
+  const subjects = [...stripped.matchAll(/"subject"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/g)]
+    .map((m) => m[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\"))
+    .filter((s) => s && s.trim());
+  if (subjects.length) {
+    console.warn(`[${label}] JSON parse failed, partial recovery extracted`,
+      subjects.length, "subjects from raw:", rawText.slice(0, 200));
+    return { issues: subjects.map((s) => ({ subject: s })) };
+  }
+  throw new Error(`${label} 回應不是 JSON 也無法 partial recovery：` + rawText.slice(0, 160));
+}
+
+/* ===== gmRequestJson：外部 API 呼叫（自訂供應商用）========================
+ * 走 GM_xmlhttpRequest 同時繞過 mixed-content + CORS（不限 host）；
+ * GM_xmlhttpRequest 不可用時 fallback fetch（僅 localhost / 開 CORS 的 host 可成）。
+ * 非 2xx / 連線失敗 / 逾時都 reject 帶中文說明。
+ */
+function gmRequestJson(url, { method = "GET", headers = {}, body = null } = {}) {
+  return new Promise((resolve, reject) => {
+    const parseOk = (status, text) => {
+      if (status < 200 || status >= 300) {
+        reject(new Error(`HTTP ${status}：${(text || "").slice(0, 240)}`));
+        return;
+      }
+      try { resolve(JSON.parse(text)); }
+      catch (_) { reject(new Error("回應非 JSON：" + (text || "").slice(0, 160))); }
+    };
+    if (typeof GM_xmlhttpRequest === "function") {
+      GM_xmlhttpRequest({
+        method, url, headers, data: body, timeout: 30000,
+        onload: (resp) => parseOk(resp.status, resp.responseText),
+        onerror: () => reject(new Error("連線失敗（檢查 Base URL／CLIProxyAPI 是否啟動／@connect 權限）")),
+        ontimeout: () => reject(new Error("連線逾時（30 秒）")),
+      });
+      return;
+    }
+    // fallback：純 fetch（HTTPS 頁僅 localhost 或有開 CORS 的 host 可成功）
+    fetch(url, { method, headers, body })
+      .then(async (r) => parseOk(r.status, await r.text()))
+      .catch((e) => reject(new Error("連線失敗：" + (e && e.message ? e.message : String(e)))));
+  });
+}
+
 const GeminiClient = (() => {
   const ENDPOINT_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
@@ -2597,26 +2705,8 @@ const GeminiClient = (() => {
     const parts = data?.candidates?.[0]?.content?.parts || [];
     const outputPart = parts.find((p) => !p.thought) || parts[0];
     const rawText = outputPart?.text || "";
-    if (!rawText) throw new Error("Gemini 回應內容為空");
-    // Wrap fn: Gemma 未受 responseSchema 約束時會回純 array; 包成 {issues: arr}
-    // 以符合 AGENT_TYPES.parseResponse 對 data.issues 的期望。
-    // Gemini 回 object 形態時原樣返回，不影響行為。
-    const wrap = (v) => Array.isArray(v) ? { issues: v } : v;
-    // Layer 1: 直接 parse
-    try { return wrap(JSON.parse(rawText)); } catch (_) {}
-    // Layer 2: 剝 markdown fence 再 parse (` ```json {...} ``` ` 樣式)
-    const stripped = rawText.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
-    try { return wrap(JSON.parse(stripped)); } catch (_) {}
-    // Layer 3: partial recovery — 從 raw text 用 regex 抽 "subject"
-    const subjects = [...stripped.matchAll(/"subject"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/g)]
-      .map((m) => m[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\"))
-      .filter((s) => s && s.trim());
-    if (subjects.length) {
-      console.warn("[GeminiClient] JSON parse failed, partial recovery extracted",
-        subjects.length, "subjects from raw:", rawText.slice(0, 200));
-      return { issues: subjects.map((s) => ({ subject: s })) };
-    }
-    throw new Error("Gemini 回應不是 JSON 也無法 partial recovery：" + rawText.slice(0, 160));
+    // 3 層 JSON 還原（直接 parse → 剝 fence → regex 救援）抽到共用 extractJsonLoose
+    return extractJsonLoose(rawText, "Gemini");
   }
 
   return { generate };
@@ -2695,6 +2785,126 @@ const AGENT_MODEL_OPTIONS = [
   "gemini-2.5-flash",
 ];
 
+/* ===== AIProvider：供應商設定（全域，所有 Agent 共用）======================
+ * GM keys:
+ *  - ai_provider:        "gemini" | "custom"（預設 gemini）
+ *  - ai_custom_base_url: 自訂供應商 Base URL（OpenAI 相容，如 Docker 的 CLIProxyAPI）
+ *  - ai_custom_api_key:  Bearer key（選填，CLIProxyAPI 未設 api-keys 時可免）
+ *  - ai_custom_models:   上次 GET /v1/models 抓到的 model id 陣列（快取，給下拉用）
+ * getModelOptions() 依當前 provider 回模型下拉來源；loadModels() 動態抓 /v1/models。
+ */
+const DEFAULT_CUSTOM_BASE_URL = "http://localhost:8317";
+
+const AIProvider = (() => {
+  function getProvider() {
+    return Store.get("ai_provider", "gemini") === "custom" ? "custom" : "gemini";
+  }
+  function getCustomConfig() {
+    return {
+      baseUrl: (Store.get("ai_custom_base_url", "") || "").trim(),
+      apiKey: (Store.get("ai_custom_api_key", "") || "").trim(),
+    };
+  }
+  function getCustomModels() {
+    const list = Store.get("ai_custom_models", []);
+    return Array.isArray(list) ? list.filter((m) => typeof m === "string" && m) : [];
+  }
+  // 模型下拉來源：custom 用抓回來的清單，gemini 用寫死的 AGENT_MODEL_OPTIONS
+  function getModelOptions() {
+    return getProvider() === "custom" ? getCustomModels() : (AGENT_MODEL_OPTIONS || []);
+  }
+  // 動態抓 /v1/models（OpenAI 格式 {data:[{id}]}），存快取並回 id 陣列
+  async function loadModels() {
+    const { baseUrl, apiKey } = getCustomConfig();
+    if (!baseUrl) throw new Error("尚未設定自訂供應商 Base URL");
+    const url = baseUrl.replace(/\/+$/, "") + "/v1/models";
+    const headers = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+    const data = await gmRequestJson(url, { headers });
+    const ids = Array.isArray(data && data.data)
+      ? data.data.map((m) => m && m.id).filter((id) => typeof id === "string" && id)
+      : [];
+    Store.set("ai_custom_models", ids);
+    return ids;
+  }
+  // modal 開啟前預檢：設定不全時回中文錯誤字串，否則回 null
+  function configError() {
+    if (getProvider() === "custom") {
+      return getCustomConfig().baseUrl
+        ? null
+        : "請先到左下角「設定 → AI 助手」設定自訂供應商 Base URL";
+    }
+    return (Store.get("gemini_api_key", "") || "").trim()
+      ? null
+      : "請先到左下角「設定 → AI 助手」填 Gemini API Key";
+  }
+  // 全域預設模型（每供應商各一個）：ai_default_model = { gemini?, custom? }
+  // AgentSettings.get() 在 per-agent 沒覆寫時 fallback 到這裡。
+  function getDefaultModel(provider) {
+    const all = Store.get("ai_default_model", {}) || {};
+    const v = all[provider || getProvider()];
+    return typeof v === "string" ? v : "";
+  }
+  function setDefaultModel(provider, model) {
+    const all = Store.get("ai_default_model", {}) || {};
+    all[provider || getProvider()] = model || "";
+    Store.set("ai_default_model", all);
+  }
+  return {
+    getProvider, getCustomConfig, getCustomModels, getModelOptions, loadModels, configError,
+    getDefaultModel, setDefaultModel,
+  };
+})();
+
+/* ===== OpenAIClient：OpenAI 相容 /v1/chat/completions（自訂供應商）========
+ * 簽章與 GeminiClient.generate 相同，供 AIClient 路由切換。
+ * OpenAI 不吃 Gemini responseSchema → 把 schema 以文字附在 system message 尾，
+ * 並用 response_format:{type:"json_object"} 要求 JSON；回應沿用 extractJsonLoose。
+ */
+const OpenAIClient = (() => {
+  async function generate(modelId, sysprompt, userInput, responseSchema) {
+    const { baseUrl, apiKey } = AIProvider.getCustomConfig();
+    if (!baseUrl) throw new Error("尚未設定自訂供應商 Base URL");
+    if (!modelId) throw new Error("尚未指定模型");
+    let system = (sysprompt || "").trim();
+    if (responseSchema) {
+      system += (system ? "\n\n" : "") +
+        "請嚴格只輸出符合此 JSON Schema 的 JSON（不要任何多餘文字或 markdown）：\n" +
+        JSON.stringify(responseSchema);
+    }
+    const messages = [];
+    if (system) messages.push({ role: "system", content: system });
+    messages.push({ role: "user", content: userInput });
+    const body = {
+      model: modelId,
+      messages,
+      response_format: { type: "json_object" },
+      max_tokens: 8192,
+    };
+    const headers = { "Content-Type": "application/json" };
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+    const url = baseUrl.replace(/\/+$/, "") + "/v1/chat/completions";
+    const data = await gmRequestJson(url, { method: "POST", headers, body: JSON.stringify(body) });
+    const rawText = data && data.choices && data.choices[0] && data.choices[0].message
+      ? (data.choices[0].message.content || "")
+      : "";
+    return extractJsonLoose(rawText, "自訂供應商");
+  }
+  return { generate };
+})();
+
+/* ===== AIClient：依 ai_provider 路由到 OpenAIClient 或 GeminiClient ========= */
+const AIClient = (() => {
+  function generate(modelId, sysprompt, userInput, responseSchema) {
+    return AIProvider.getProvider() === "custom"
+      ? OpenAIClient.generate(modelId, sysprompt, userInput, responseSchema)
+      : GeminiClient.generate(modelId, sysprompt, userInput, responseSchema);
+  }
+  return { generate };
+})();
+
+window.__worklog_AIProvider = AIProvider;
+window.__worklog_AIClient = AIClient;
+
 /* ===== AgentSettings：每個 agent 的 sysprompt + model 持久化 ===============
  * GM key: ai_agent_settings = { [agentTypeId]: { sysprompt, model } }
  * 沒設定的 agent 用 AGENT_TYPES[id].default*。
@@ -2710,9 +2920,13 @@ const AgentSettings = (() => {
     const type = AGENT_TYPES[agentTypeId];
     if (!type) throw new Error(`unknown agent type: ${agentTypeId}`);
     const saved = loadAll()[agentTypeId] || {};
+    // 模型三層解析：per-agent 覆寫 → 全域預設(ai_default_model[provider]) → 寫死 defaultModel
+    const override = (typeof saved.model === "string" && saved.model) ? saved.model : "";
+    const def = (typeof AIProvider !== "undefined" && AIProvider.getDefaultModel()) || "";
     return {
       sysprompt: typeof saved.sysprompt === "string" ? saved.sysprompt : type.defaultSysprompt,
-      model: typeof saved.model === "string" && saved.model ? saved.model : type.defaultModel,
+      model: override || def || type.defaultModel,  // 解析後實際使用的 model
+      modelOverride: override,                       // 原始覆寫值（""=跟隨全域預設，給設定 UI 判斷）
     };
   }
 
@@ -2996,11 +3210,18 @@ function applySettingsPatches(root) {
     if (!agentId) return "";
     const type = AGENT_TYPES[agentId];
     const cfg = AgentSettings.get(agentId);
-    const inOptions = (AGENT_MODEL_OPTIONS || []).includes(cfg.model);
-    const modelOptions = (AGENT_MODEL_OPTIONS || [])
-      .map((m) => `<option value="${m}" ${m === cfg.model ? "selected" : ""}>${m}</option>`)
+    // 模型下拉來源依當前供應商：custom 用 /v1/models 抓回的清單，gemini 用寫死清單
+    const modelList = (typeof AIProvider !== "undefined" ? AIProvider.getModelOptions() : AGENT_MODEL_OPTIONS) || [];
+    // override=""→跟隨全域預設。follow 標籤要顯示「真正的全域預設」而非已解析值
+    // （cfg.model 在有覆寫時等於覆寫值，拿來當 follow 標籤會誤導）
+    const override = cfg.modelOverride || "";
+    const inOptions = override && modelList.includes(override);
+    const def = (typeof AIProvider !== "undefined" && AIProvider.getDefaultModel()) || type.defaultModel;
+    const followOpt = `<option value="" ${override ? "" : "selected"}>（跟隨全域預設：${def || "未設定"}）</option>`;
+    const modelOptions = followOpt + modelList
+      .map((m) => `<option value="${m}" ${m === override ? "selected" : ""}>${m}</option>`)
       .join("");
-    const customModel = inOptions ? "" : cfg.model;
+    const customModel = (override && !inOptions) ? override : "";
     const safeSysprompt = (cfg.sysprompt || "")
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     return `
@@ -3009,7 +3230,7 @@ function applySettingsPatches(root) {
         <div class="pj-field-stack" style="margin-top: 12px;">
           <span class="muted">Agent: <strong>${type.label}</strong></span>
           <label class="pj-field-stack" style="margin-top: 12px;">
-            <span>模型</span>
+            <span>模型（覆寫全域預設，留空＝跟隨）</span>
             <select data-ai-agent-model="${agentId}">${modelOptions}</select>
           </label>
           <label class="pj-field-stack" style="margin-top: 12px;">
@@ -3120,6 +3341,138 @@ function applySettingsPatches(root) {
     aiKeyInput.addEventListener("blur", persistAiKey);
   }
 
+  // ===== AI 助手 tab：供應商選擇 + 自訂供應商（Base URL / Key / 載入模型）bind =====
+  // AIProvider / DEFAULT_CUSTOM_BASE_URL 由 runtime.js (outer scope) 提供。
+  const providerSelect = body.querySelector("#setting-ai-provider");
+  const geminiBlock = body.querySelector("#ai-provider-gemini");
+  const customBlock = body.querySelector("#ai-provider-custom");
+  const baseUrlInput = body.querySelector("#setting-ai-custom-base-url");
+  const customKeyInput = body.querySelector("#setting-ai-custom-api-key");
+  const loadModelsBtn = body.querySelector("#setting-ai-load-models");
+  const modelsStatus = body.querySelector("#setting-ai-models-status");
+
+  // 供應商切換 / 載入模型 / 改全域預設後，重建各功能 Agent 的「模型」下拉
+  // 首選項＝跟隨全域預設（value=""），其餘為可選模型；保留現有覆寫值不被洗掉。
+  function refreshAgentModelSelects() {
+    if (typeof AIProvider === "undefined") return;
+    const list = AIProvider.getModelOptions() || [];
+    for (const sel of body.querySelectorAll("[data-ai-agent-model]")) {
+      const cur = sel.value;  // ""=跟隨全域預設，或某個覆寫 model id
+      const agentId = sel.getAttribute("data-ai-agent-model");
+      const def = AIProvider.getDefaultModel()
+        || (typeof AGENT_TYPES !== "undefined" && AGENT_TYPES[agentId] ? AGENT_TYPES[agentId].defaultModel : "");
+      const opts = list.slice();
+      if (cur && !opts.includes(cur)) opts.unshift(cur);  // 保留覆寫值
+      sel.innerHTML =
+        `<option value="" ${cur ? "" : "selected"}>（跟隨全域預設：${def || "未設定"}）</option>` +
+        opts.map((m) => `<option value="${m}" ${m === cur ? "selected" : ""}>${m}</option>`).join("");
+    }
+  }
+
+  function syncProviderBlocks(provider) {
+    if (geminiBlock) geminiBlock.hidden = provider !== "gemini";
+    if (customBlock) customBlock.hidden = provider !== "custom";
+  }
+
+  if (providerSelect) {
+    const cur = Store.get("ai_provider", "gemini") === "custom" ? "custom" : "gemini";
+    providerSelect.value = cur;
+    syncProviderBlocks(cur);
+    providerSelect.addEventListener("change", () => {
+      const p = providerSelect.value === "custom" ? "custom" : "gemini";
+      Store.set("ai_provider", p);
+      syncProviderBlocks(p);
+      refreshAgentModelSelects();
+    });
+  }
+
+  if (baseUrlInput) {
+    baseUrlInput.value = String(Store.get("ai_custom_base_url", "") || "");
+    if (!baseUrlInput.value && typeof DEFAULT_CUSTOM_BASE_URL !== "undefined") {
+      // 首次預填預設值並落地，讓切到自訂供應商時 configError 直接通過
+      baseUrlInput.value = DEFAULT_CUSTOM_BASE_URL;
+      Store.set("ai_custom_base_url", DEFAULT_CUSTOM_BASE_URL);
+    }
+    const persist = () => Store.set("ai_custom_base_url", baseUrlInput.value.trim());
+    baseUrlInput.addEventListener("change", persist);
+    baseUrlInput.addEventListener("blur", persist);
+  }
+
+  if (customKeyInput) {
+    customKeyInput.value = String(Store.get("ai_custom_api_key", "") || "");
+    const persist = () => Store.set("ai_custom_api_key", customKeyInput.value.trim());
+    customKeyInput.addEventListener("change", persist);
+    customKeyInput.addEventListener("blur", persist);
+  }
+
+  // ===== 全域預設模型（每供應商各一個）bind =====
+  const geminiDefaultSelect = body.querySelector("#setting-ai-gemini-default-model");
+  const geminiDefaultCustom = body.querySelector("#setting-ai-gemini-default-custom");
+  const customDefaultSelect = body.querySelector("#setting-ai-custom-default-model");
+  const customDefaultCustom = body.querySelector("#setting-ai-custom-default-custom");
+
+  // 依清單重建某供應商的「預設模型」下拉，選回已存值（不在清單則放 custom input）
+  function rebuildDefaultModelSelect(provider, selectEl, customEl, list) {
+    if (typeof AIProvider === "undefined" || !selectEl) return;
+    const cur = AIProvider.getDefaultModel(provider);
+    const opts = (list || []).slice();
+    const inList = cur && opts.includes(cur);
+    selectEl.innerHTML =
+      `<option value="">（未設定／用內建預設）</option>` +
+      opts.map((m) => `<option value="${m}" ${m === cur ? "selected" : ""}>${m}</option>`).join("");
+    if (customEl) customEl.value = (cur && !inList) ? cur : "";
+  }
+
+  function bindDefaultModelPicker(provider, selectEl, customEl) {
+    if (typeof AIProvider === "undefined") return;
+    const persist = () => {
+      const custom = customEl ? customEl.value.trim() : "";
+      const model = custom || (selectEl ? selectEl.value : "");
+      AIProvider.setDefaultModel(provider, model);
+      refreshAgentModelSelects();  // 改全域預設後，未覆寫的 Agent follow 標籤同步
+    };
+    if (selectEl) selectEl.addEventListener("change", persist);
+    if (customEl) {
+      customEl.addEventListener("change", persist);
+      customEl.addEventListener("blur", persist);
+    }
+  }
+
+  rebuildDefaultModelSelect("gemini", geminiDefaultSelect, geminiDefaultCustom,
+    (typeof AGENT_MODEL_OPTIONS !== "undefined" ? AGENT_MODEL_OPTIONS : []));
+  rebuildDefaultModelSelect("custom", customDefaultSelect, customDefaultCustom,
+    (typeof AIProvider !== "undefined" ? AIProvider.getCustomModels() : []));
+  bindDefaultModelPicker("gemini", geminiDefaultSelect, geminiDefaultCustom);
+  bindDefaultModelPicker("custom", customDefaultSelect, customDefaultCustom);
+
+  if (loadModelsBtn) {
+    loadModelsBtn.addEventListener("click", async () => {
+      if (typeof AIProvider === "undefined") return;
+      // 先把當前輸入落地再抓（避免使用者改了 URL / key 還沒 blur）
+      if (baseUrlInput) Store.set("ai_custom_base_url", baseUrlInput.value.trim());
+      if (customKeyInput) Store.set("ai_custom_api_key", customKeyInput.value.trim());
+      loadModelsBtn.disabled = true;
+      if (modelsStatus) modelsStatus.textContent = "載入中…";
+      try {
+        const ids = await AIProvider.loadModels();
+        if (modelsStatus) {
+          modelsStatus.textContent = ids.length
+            ? `已載入 ${ids.length} 個模型`
+            : "連線成功但沒有可用模型";
+        }
+        // 載入後同步：自訂供應商「預設模型」下拉 + 各功能 Agent 下拉
+        rebuildDefaultModelSelect("custom", customDefaultSelect, customDefaultCustom, ids);
+        refreshAgentModelSelects();
+      } catch (err) {
+        if (modelsStatus) {
+          modelsStatus.textContent = "載入失敗：" + (err && err.message ? err.message : String(err));
+        }
+      } finally {
+        loadModelsBtn.disabled = false;
+      }
+    });
+  }
+
   // ===== Per-view AI Agent section：sysprompt / model bind =====
   // AgentSettings / AGENT_TYPES / AGENT_MODEL_OPTIONS 由 runtime.js 提供 (outer
   // scope), 直接 lexical lookup。
@@ -3133,8 +3486,9 @@ function applySettingsPatches(root) {
         const custom = customInput ? customInput.value.trim() : "";
         const model = custom || (modelSelect ? modelSelect.value : "");
         AgentSettings.save(agentId, { sysprompt, model });
+        refreshAgentModelSelects();  // 同步 follow 標籤 / 選取狀態
         const status = body.querySelector(`[data-ai-agent-status="${agentId}"]`);
-        if (status) status.textContent = `已儲存（model: ${model}）`;
+        if (status) status.textContent = model ? `已儲存（覆寫模型：${model}）` : "已儲存（跟隨全域預設）";
       });
     }
     for (const resetBtn of body.querySelectorAll("[data-ai-agent-reset]")) {
@@ -3146,12 +3500,10 @@ function applySettingsPatches(root) {
         const customInput = body.querySelector(`[data-ai-agent-custom-model="${agentId}"]`);
         const modelSelect = body.querySelector(`[data-ai-agent-model="${agentId}"]`);
         if (sysprompt) sysprompt.value = cfg.sysprompt;
-        if (AGENT_MODEL_OPTIONS.includes(cfg.model)) {
-          if (modelSelect) modelSelect.value = cfg.model;
-          if (customInput) customInput.value = "";
-        } else {
-          if (customInput) customInput.value = cfg.model;
-        }
+        // reset 已刪除 per-agent 覆寫 → 模型回到「跟隨全域預設」
+        if (modelSelect) modelSelect.value = "";
+        if (customInput) customInput.value = "";
+        refreshAgentModelSelects();  // 重建下拉並更新 follow 標籤
         const status = body.querySelector(`[data-ai-agent-status="${agentId}"]`);
         if (status) status.textContent = "已重設為預設";
       });
@@ -3959,8 +4311,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202606092206";
-const APP_BUILD_TIME = "2026-06-09 22:06";
+const APP_VERSION = "1.0.202606092253";
+const APP_BUILD_TIME = "2026-06-09 22:53";
 
 const state = {
   localToday: localDateString(new Date()),
@@ -4865,9 +5217,9 @@ const AISuggestModal = (() => {
       showToast("Unknown agent type: " + agentTypeId, { type: "error" });
       return;
     }
-    const apiKey = (Store.get("gemini_api_key", "") || "").trim();
-    if (!apiKey) {
-      showToast("請先到左下角「設定 → AI 助手」填 Gemini API Key", { type: "error" });
+    const cfgErr = (typeof AIProvider !== "undefined") ? AIProvider.configError() : null;
+    if (cfgErr) {
+      showToast(cfgErr, { type: "error" });
       return;
     }
     currentAgentId = agentTypeId;
@@ -4989,7 +5341,7 @@ const AISuggestModal = (() => {
     elements.aiSuggestStatus.textContent = "AI 生成中…";
     elements.aiSuggestResults.innerHTML = "";
     try {
-      const data = await GeminiClient.generate(cfg.model, cfg.sysprompt, userInput, type.outputSchema);
+      const data = await AIClient.generate(cfg.model, cfg.sysprompt, userInput, type.outputSchema);
       const items = type.parseResponse(data);
       if (!items.length) {
         elements.aiSuggestStatus.textContent = "AI 沒回任何建議，請調整任務描述或 sysprompt 再試";
@@ -5153,7 +5505,8 @@ const AIFab = (() => {
     } else {
       elements.aiFab.disabled = false;
       const type = AGENT_TYPES[agentId];
-      elements.aiFab.title = `✨ ${type.label}（呼叫 Gemini 產建議）`;
+      const providerName = (typeof AIProvider !== "undefined" && AIProvider.getProvider() === "custom") ? "自訂供應商" : "Gemini";
+      elements.aiFab.title = `✨ ${type.label}（呼叫 ${providerName} 產建議）`;
     }
     elements.aiFab.hidden = false;
   }

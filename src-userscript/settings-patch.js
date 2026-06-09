@@ -168,11 +168,18 @@ function applySettingsPatches(root) {
     if (!agentId) return "";
     const type = AGENT_TYPES[agentId];
     const cfg = AgentSettings.get(agentId);
-    const inOptions = (AGENT_MODEL_OPTIONS || []).includes(cfg.model);
-    const modelOptions = (AGENT_MODEL_OPTIONS || [])
-      .map((m) => `<option value="${m}" ${m === cfg.model ? "selected" : ""}>${m}</option>`)
+    // 模型下拉來源依當前供應商：custom 用 /v1/models 抓回的清單，gemini 用寫死清單
+    const modelList = (typeof AIProvider !== "undefined" ? AIProvider.getModelOptions() : AGENT_MODEL_OPTIONS) || [];
+    // override=""→跟隨全域預設。follow 標籤要顯示「真正的全域預設」而非已解析值
+    // （cfg.model 在有覆寫時等於覆寫值，拿來當 follow 標籤會誤導）
+    const override = cfg.modelOverride || "";
+    const inOptions = override && modelList.includes(override);
+    const def = (typeof AIProvider !== "undefined" && AIProvider.getDefaultModel()) || type.defaultModel;
+    const followOpt = `<option value="" ${override ? "" : "selected"}>（跟隨全域預設：${def || "未設定"}）</option>`;
+    const modelOptions = followOpt + modelList
+      .map((m) => `<option value="${m}" ${m === override ? "selected" : ""}>${m}</option>`)
       .join("");
-    const customModel = inOptions ? "" : cfg.model;
+    const customModel = (override && !inOptions) ? override : "";
     const safeSysprompt = (cfg.sysprompt || "")
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     return `
@@ -181,7 +188,7 @@ function applySettingsPatches(root) {
         <div class="field-stack" style="margin-top: 12px;">
           <span class="muted">Agent: <strong>${type.label}</strong></span>
           <label class="field-stack" style="margin-top: 12px;">
-            <span>模型</span>
+            <span>模型（覆寫全域預設，留空＝跟隨）</span>
             <select data-ai-agent-model="${agentId}">${modelOptions}</select>
           </label>
           <label class="field-stack" style="margin-top: 12px;">
@@ -292,6 +299,138 @@ function applySettingsPatches(root) {
     aiKeyInput.addEventListener("blur", persistAiKey);
   }
 
+  // ===== AI 助手 tab：供應商選擇 + 自訂供應商（Base URL / Key / 載入模型）bind =====
+  // AIProvider / DEFAULT_CUSTOM_BASE_URL 由 runtime.js (outer scope) 提供。
+  const providerSelect = body.querySelector("#setting-ai-provider");
+  const geminiBlock = body.querySelector("#ai-provider-gemini");
+  const customBlock = body.querySelector("#ai-provider-custom");
+  const baseUrlInput = body.querySelector("#setting-ai-custom-base-url");
+  const customKeyInput = body.querySelector("#setting-ai-custom-api-key");
+  const loadModelsBtn = body.querySelector("#setting-ai-load-models");
+  const modelsStatus = body.querySelector("#setting-ai-models-status");
+
+  // 供應商切換 / 載入模型 / 改全域預設後，重建各功能 Agent 的「模型」下拉
+  // 首選項＝跟隨全域預設（value=""），其餘為可選模型；保留現有覆寫值不被洗掉。
+  function refreshAgentModelSelects() {
+    if (typeof AIProvider === "undefined") return;
+    const list = AIProvider.getModelOptions() || [];
+    for (const sel of body.querySelectorAll("[data-ai-agent-model]")) {
+      const cur = sel.value;  // ""=跟隨全域預設，或某個覆寫 model id
+      const agentId = sel.getAttribute("data-ai-agent-model");
+      const def = AIProvider.getDefaultModel()
+        || (typeof AGENT_TYPES !== "undefined" && AGENT_TYPES[agentId] ? AGENT_TYPES[agentId].defaultModel : "");
+      const opts = list.slice();
+      if (cur && !opts.includes(cur)) opts.unshift(cur);  // 保留覆寫值
+      sel.innerHTML =
+        `<option value="" ${cur ? "" : "selected"}>（跟隨全域預設：${def || "未設定"}）</option>` +
+        opts.map((m) => `<option value="${m}" ${m === cur ? "selected" : ""}>${m}</option>`).join("");
+    }
+  }
+
+  function syncProviderBlocks(provider) {
+    if (geminiBlock) geminiBlock.hidden = provider !== "gemini";
+    if (customBlock) customBlock.hidden = provider !== "custom";
+  }
+
+  if (providerSelect) {
+    const cur = Store.get("ai_provider", "gemini") === "custom" ? "custom" : "gemini";
+    providerSelect.value = cur;
+    syncProviderBlocks(cur);
+    providerSelect.addEventListener("change", () => {
+      const p = providerSelect.value === "custom" ? "custom" : "gemini";
+      Store.set("ai_provider", p);
+      syncProviderBlocks(p);
+      refreshAgentModelSelects();
+    });
+  }
+
+  if (baseUrlInput) {
+    baseUrlInput.value = String(Store.get("ai_custom_base_url", "") || "");
+    if (!baseUrlInput.value && typeof DEFAULT_CUSTOM_BASE_URL !== "undefined") {
+      // 首次預填預設值並落地，讓切到自訂供應商時 configError 直接通過
+      baseUrlInput.value = DEFAULT_CUSTOM_BASE_URL;
+      Store.set("ai_custom_base_url", DEFAULT_CUSTOM_BASE_URL);
+    }
+    const persist = () => Store.set("ai_custom_base_url", baseUrlInput.value.trim());
+    baseUrlInput.addEventListener("change", persist);
+    baseUrlInput.addEventListener("blur", persist);
+  }
+
+  if (customKeyInput) {
+    customKeyInput.value = String(Store.get("ai_custom_api_key", "") || "");
+    const persist = () => Store.set("ai_custom_api_key", customKeyInput.value.trim());
+    customKeyInput.addEventListener("change", persist);
+    customKeyInput.addEventListener("blur", persist);
+  }
+
+  // ===== 全域預設模型（每供應商各一個）bind =====
+  const geminiDefaultSelect = body.querySelector("#setting-ai-gemini-default-model");
+  const geminiDefaultCustom = body.querySelector("#setting-ai-gemini-default-custom");
+  const customDefaultSelect = body.querySelector("#setting-ai-custom-default-model");
+  const customDefaultCustom = body.querySelector("#setting-ai-custom-default-custom");
+
+  // 依清單重建某供應商的「預設模型」下拉，選回已存值（不在清單則放 custom input）
+  function rebuildDefaultModelSelect(provider, selectEl, customEl, list) {
+    if (typeof AIProvider === "undefined" || !selectEl) return;
+    const cur = AIProvider.getDefaultModel(provider);
+    const opts = (list || []).slice();
+    const inList = cur && opts.includes(cur);
+    selectEl.innerHTML =
+      `<option value="">（未設定／用內建預設）</option>` +
+      opts.map((m) => `<option value="${m}" ${m === cur ? "selected" : ""}>${m}</option>`).join("");
+    if (customEl) customEl.value = (cur && !inList) ? cur : "";
+  }
+
+  function bindDefaultModelPicker(provider, selectEl, customEl) {
+    if (typeof AIProvider === "undefined") return;
+    const persist = () => {
+      const custom = customEl ? customEl.value.trim() : "";
+      const model = custom || (selectEl ? selectEl.value : "");
+      AIProvider.setDefaultModel(provider, model);
+      refreshAgentModelSelects();  // 改全域預設後，未覆寫的 Agent follow 標籤同步
+    };
+    if (selectEl) selectEl.addEventListener("change", persist);
+    if (customEl) {
+      customEl.addEventListener("change", persist);
+      customEl.addEventListener("blur", persist);
+    }
+  }
+
+  rebuildDefaultModelSelect("gemini", geminiDefaultSelect, geminiDefaultCustom,
+    (typeof AGENT_MODEL_OPTIONS !== "undefined" ? AGENT_MODEL_OPTIONS : []));
+  rebuildDefaultModelSelect("custom", customDefaultSelect, customDefaultCustom,
+    (typeof AIProvider !== "undefined" ? AIProvider.getCustomModels() : []));
+  bindDefaultModelPicker("gemini", geminiDefaultSelect, geminiDefaultCustom);
+  bindDefaultModelPicker("custom", customDefaultSelect, customDefaultCustom);
+
+  if (loadModelsBtn) {
+    loadModelsBtn.addEventListener("click", async () => {
+      if (typeof AIProvider === "undefined") return;
+      // 先把當前輸入落地再抓（避免使用者改了 URL / key 還沒 blur）
+      if (baseUrlInput) Store.set("ai_custom_base_url", baseUrlInput.value.trim());
+      if (customKeyInput) Store.set("ai_custom_api_key", customKeyInput.value.trim());
+      loadModelsBtn.disabled = true;
+      if (modelsStatus) modelsStatus.textContent = "載入中…";
+      try {
+        const ids = await AIProvider.loadModels();
+        if (modelsStatus) {
+          modelsStatus.textContent = ids.length
+            ? `已載入 ${ids.length} 個模型`
+            : "連線成功但沒有可用模型";
+        }
+        // 載入後同步：自訂供應商「預設模型」下拉 + 各功能 Agent 下拉
+        rebuildDefaultModelSelect("custom", customDefaultSelect, customDefaultCustom, ids);
+        refreshAgentModelSelects();
+      } catch (err) {
+        if (modelsStatus) {
+          modelsStatus.textContent = "載入失敗：" + (err && err.message ? err.message : String(err));
+        }
+      } finally {
+        loadModelsBtn.disabled = false;
+      }
+    });
+  }
+
   // ===== Per-view AI Agent section：sysprompt / model bind =====
   // AgentSettings / AGENT_TYPES / AGENT_MODEL_OPTIONS 由 runtime.js 提供 (outer
   // scope), 直接 lexical lookup。
@@ -305,8 +444,9 @@ function applySettingsPatches(root) {
         const custom = customInput ? customInput.value.trim() : "";
         const model = custom || (modelSelect ? modelSelect.value : "");
         AgentSettings.save(agentId, { sysprompt, model });
+        refreshAgentModelSelects();  // 同步 follow 標籤 / 選取狀態
         const status = body.querySelector(`[data-ai-agent-status="${agentId}"]`);
-        if (status) status.textContent = `已儲存（model: ${model}）`;
+        if (status) status.textContent = model ? `已儲存（覆寫模型：${model}）` : "已儲存（跟隨全域預設）";
       });
     }
     for (const resetBtn of body.querySelectorAll("[data-ai-agent-reset]")) {
@@ -318,12 +458,10 @@ function applySettingsPatches(root) {
         const customInput = body.querySelector(`[data-ai-agent-custom-model="${agentId}"]`);
         const modelSelect = body.querySelector(`[data-ai-agent-model="${agentId}"]`);
         if (sysprompt) sysprompt.value = cfg.sysprompt;
-        if (AGENT_MODEL_OPTIONS.includes(cfg.model)) {
-          if (modelSelect) modelSelect.value = cfg.model;
-          if (customInput) customInput.value = "";
-        } else {
-          if (customInput) customInput.value = cfg.model;
-        }
+        // reset 已刪除 per-agent 覆寫 → 模型回到「跟隨全域預設」
+        if (modelSelect) modelSelect.value = "";
+        if (customInput) customInput.value = "";
+        refreshAgentModelSelects();  // 重建下拉並更新 follow 標籤
         const status = body.querySelector(`[data-ai-agent-status="${agentId}"]`);
         if (status) status.textContent = "已重設為預設";
       });
