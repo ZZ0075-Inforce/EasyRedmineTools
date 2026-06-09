@@ -12,6 +12,10 @@ const LAUNCHER_CSS = `
   animation: __worklog_fade_in 150ms ease-out;
 }
 @keyframes __worklog_fade_in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes __worklog_pop_in {
+  from { opacity: 0; transform: scale(.97); }
+  to { opacity: 1; transform: scale(1); }
+}
 
 #${OVERLAY_ROOT_ID} {
   position: fixed !important;
@@ -29,6 +33,8 @@ const LAUNCHER_CSS = `
   border-radius: 14px;
   box-shadow: 0 12px 40px rgba(0,0,0,.3);
   overflow: hidden;  /* 外層不滾，內層 .shell 自己 scroll */
+  animation: __worklog_pop_in 180ms ease-out;  /* 進場 scale-in；showOverlay 會重播 */
+  transform-origin: center center;
 }
 #${OVERLAY_ROOT_ID} .app-shell {
   height: 100% !important;
@@ -145,6 +151,20 @@ const LAUNCHER_CSS = `
 }
 #${CLOSE_BTN_ID}:hover { background: #fff; transform: scale(1.05); }
 
+/* Dark theme：build 把 data-theme 設在 #__worklog_root；close 鈕 / backdrop 是其
+   body 層 sibling，無法用後代選擇器，改用 :has() 從 body 偵測 overlay 的主題。 */
+body:has(#${OVERLAY_ROOT_ID}[data-theme="dark"]) #${CLOSE_BTN_ID} {
+  background: rgba(40,36,32,.92);
+  border-color: rgba(255,255,255,.14);
+  color: #f2ede7;
+}
+body:has(#${OVERLAY_ROOT_ID}[data-theme="dark"]) #${CLOSE_BTN_ID}:hover {
+  background: #2a2622;
+}
+body:has(#${OVERLAY_ROOT_ID}[data-theme="dark"]) #${BACKDROP_ID} {
+  background: rgba(0,0,0,.6);
+}
+
 @media (max-width: 600px) {
   #${OVERLAY_ROOT_ID} {
     top: 12px !important; left: 12px !important;
@@ -224,11 +244,22 @@ function mountOverlay() {
   __overlayMounted = true;
 }
 
+function replayAnim(el, anim) {
+  if (!el) return;
+  el.style.animation = "none";
+  // 強制 reflow，讓同一段 animation 能重新觸發（否則二次顯示不會重播）
+  void el.offsetWidth;
+  el.style.animation = anim;
+}
+
 function showOverlay() {
   if (!__overlayMounted) return;
   __overlayRoot.hidden = false;
   __backdrop.hidden = false;
   __closeBtn.hidden = false;
+  // mount 時注入的 CSS animation 不會在二次顯示自動重跑，手動重播進場動畫
+  replayAnim(__overlayRoot, "__worklog_pop_in 180ms ease-out");
+  replayAnim(__backdrop, "__worklog_fade_in 150ms ease-out");
 }
 
 function hideOverlay() {

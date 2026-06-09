@@ -495,7 +495,7 @@
         font-size: 14px;
         font-weight: 500;
         line-height: 1;
-        transition: background 150ms ease-out, border-color 150ms ease-out;
+        transition: background 150ms ease-out, border-color 150ms ease-out, box-shadow 150ms ease-out, transform 150ms ease-out;
         white-space: nowrap;
         display: inline-flex;
         align-items: center;
@@ -503,13 +503,23 @@
       }
 
       .action-button { background: var(--accent); color: white; }
-      .action-button:hover { background: var(--accent-hover); }
+      .action-button:hover:not(:disabled) {
+        background: var(--accent-hover);
+        box-shadow: var(--shadow-md);
+        transform: translateY(-1px);
+      }
+      .action-button:active:not(:disabled) { transform: translateY(0); box-shadow: var(--shadow); }
       .ghost-button {
         background: transparent;
         color: var(--ink);
         border: 1px solid var(--panel-border);
       }
-      .ghost-button:hover { background: var(--subtle); }
+      .ghost-button:hover:not(:disabled) {
+        background: var(--subtle);
+        box-shadow: var(--shadow);
+        transform: translateY(-1px);
+      }
+      .ghost-button:active:not(:disabled) { transform: translateY(0); box-shadow: none; }
       .danger-button { background: transparent; color: var(--danger); border: 1px solid var(--panel-border); }
       .danger-button:hover { background: var(--danger-soft); border-color: var(--danger); }
       button:disabled {
@@ -992,6 +1002,16 @@
       .hours-input { -moz-appearance: textfield; appearance: textfield; }
 
       .row-errors { margin: 0; padding-left: 16px; color: var(--danger); font-size: 13px; line-height: 1.5; }
+      /* 即時驗證紅框：套在 activity select / manual input 上；hours-input 因 border:0
+         改由外層 hours-stepper 顯示紅框 */
+      .field-invalid {
+        border-color: var(--danger) !important;
+        box-shadow: 0 0 0 2px var(--danger-soft) !important;
+      }
+      .hours-stepper:has(.hours-input.field-invalid) {
+        border-color: var(--danger);
+        box-shadow: 0 0 0 2px var(--danger-soft);
+      }
       .duplicate-chip {
         display: inline-flex;
         margin-bottom: 6px;
@@ -1001,6 +1021,15 @@
         color: var(--warn-text);
         font-size: 12px;
         border: 1px solid var(--warn-border);
+      }
+      /* duplicate 改為醒目警示（保留勾選、由使用者決定）：紅底取代原本低調的 warn 黃 */
+      .duplicate-chip-strong {
+        display: block;
+        background: var(--danger-soft);
+        color: var(--danger);
+        border-color: var(--danger);
+        font-weight: 600;
+        line-height: 1.5;
       }
       .duplicate-list, .result-list { margin: 0; padding-left: 16px; color: var(--muted); line-height: 1.55; }
 
@@ -1969,7 +1998,7 @@
           <div class="alert-stack" id="alert-stack"></div>
           <div class="table-wrap" id="table-wrap"></div>
           <div class="sticky-actions" id="sticky-actions">
-            <span class="muted" id="sticky-summary">至少填入一筆工時後即可送出。</span>
+            <span class="muted" id="sticky-summary">至少填入一筆工時後即可送出（Ctrl/⌘ + Enter 快速送出）。</span>
             <button class="action-button" id="commit-button">送出工時</button>
           </div>
         </aside>

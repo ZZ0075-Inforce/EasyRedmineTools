@@ -89,9 +89,10 @@ const TimeEntryHandlers = {
           comments: t.comments || "",
         }));
         if (existing.length) {
+          // 偵測到同 issue 同日已有工時：標記 duplicate 並回傳既有明細，但「保留勾選」，
+          // 由使用者看警示後自行決定送出或移除（不再默默取消勾選造成「勾了卻沒送」的困惑）。
           e.duplicate = true;
           e.duplicate_entries = existing;
-          e.selected = false;
         }
       } catch (err) {
         warnings.push(`Issue #${e.issue_id} duplicate 查詢失敗：${err.message}`);

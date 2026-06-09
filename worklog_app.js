@@ -1622,6 +1622,25 @@ function sourceUsesMineApi(source) {
   return source.type === "mine" || source.type === "mine-grouped" || source.type === "schedule";
 }
 
+// Client 端即時驗證：與 time-entry-handlers.js 的 validateEntry 同 key（hours /
+// activity_id）同口徑，讓使用者在送出前就看到欄位錯誤，不必等 preview 回填。
+function validateDraftEntryLive(entry) {
+  const errors = {};
+  const hours = Number(entry.hours);
+  if (!entry.hours || !Number.isFinite(hours) || hours < 0.1) {
+    errors.hours = "請輸入有效時數（≥ 0.1）";
+  } else if (hours > 24) {
+    errors.hours = "時數不可超過 24 小時";
+  }
+  if (entry.activity_id === "" || entry.activity_id == null) {
+    errors.activity_id = "請選擇活動類型";
+  } else if (state.manualActivityEntry) {
+    const aid = Number(entry.activity_id);
+    if (!Number.isFinite(aid) || aid <= 0) errors.activity_id = "活動 ID 需為正整數";
+  }
+  return errors;
+}
+
 function clearEntryPreviewState(entry) {
   entry.errors = {};
   entry.duplicate = false;
@@ -2123,11 +2142,13 @@ function activityOptionsHtml(currentValue) {
 }
 
 function activityFieldHtml(entry) {
+  const invalidAttr = (entry.errors && entry.errors.activity_id)
+    ? ' class="field-invalid" aria-invalid="true"' : "";
   if (state.manualActivityEntry) {
-    return `<input type="number" min="1" value="${escapeHtml(entry.activity_id || "")}" data-row-field="activity_id" data-issue-id="${entry.issue_id}" placeholder="activity_id">`;
+    return `<input type="number" min="1" value="${escapeHtml(entry.activity_id || "")}" data-row-field="activity_id" data-issue-id="${entry.issue_id}" placeholder="activity_id"${invalidAttr}>`;
   }
   return `
-    <select data-row-field="activity_id" data-issue-id="${entry.issue_id}">
+    <select data-row-field="activity_id" data-issue-id="${entry.issue_id}"${invalidAttr}>
       <option value="">選擇活動</option>
       ${activityOptionsHtml(entry.activity_id)}
     </select>
@@ -2178,7 +2199,7 @@ function renderRow(entry) {
           <span class="mobile-label">時數</span>
           <div class="hours-stepper">
             <button type="button" class="stepper-btn" data-hours-step="-0.5" data-issue-id="${entry.issue_id}" aria-label="減 0.5 小時">−</button>
-            <input class="hours-input" type="number" step="0.5" min="0" max="24" value="${escapeHtml(entry.hours || "")}" data-row-field="hours" data-issue-id="${entry.issue_id}" placeholder="1.5">
+            <input class="hours-input${entry.errors && entry.errors.hours ? " field-invalid" : ""}" type="number" step="0.5" min="0" max="24" value="${escapeHtml(entry.hours || "")}" data-row-field="hours" data-issue-id="${entry.issue_id}" placeholder="1.5"${entry.errors && entry.errors.hours ? ' aria-invalid="true"' : ""}>
             <button type="button" class="stepper-btn" data-hours-step="0.5" data-issue-id="${entry.issue_id}" aria-label="加 0.5 小時">+</button>
           </div>
         </td>
@@ -2192,9 +2213,9 @@ function renderRow(entry) {
         </td>
         <td>
           <span class="mobile-label">驗證</span>
-          ${entry.duplicate ? '<div class="duplicate-chip">此 issue 同日期已有工時，已自動取消勾選</div>' : ""}
+          ${entry.duplicate ? `<div class="duplicate-chip duplicate-chip-strong">⚠️ 此 issue 在 ${escapeHtml(state.batchSpentOn || "該日")} 已有工時，確認非重複再送出；要排除請點左側 ×</div>` : ""}
           ${duplicateList ? `<ul class="duplicate-list">${duplicateList}</ul>` : ""}
-          ${errors.length ? `<ul class="row-errors">${errors.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : '<span class="muted">尚未送出或無錯誤</span>'}
+          ${errors.length ? `<ul class="row-errors">${errors.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : '<span class="muted">✓ 已填妥</span>'}
         </td>
       </tr>
     </tbody>
@@ -2292,6 +2313,15 @@ function highlightFocusedRow() {
   }
 }
 
+// 驗證失敗後把焦點帶到第一個有錯誤的欄位（捲到畫面中央），省去使用者自己找紅字。
+// 無錯誤欄位（例如純網路錯誤）時為 no-op。
+function focusFirstInvalidField() {
+  const el = elements.tableWrap.querySelector('[aria-invalid="true"]');
+  if (!el) return;
+  el.scrollIntoView({ block: "center", behavior: "smooth" });
+  el.focus();
+}
+
 function selectedValidRows() {
   return state.draftEntries.filter((entry) => !Object.keys(entry.errors || {}).length);
 }
@@ -2386,6 +2416,13 @@ function renderTable() {
   }
 
   elements.workbenchSummary.textContent = `已選 ${state.draftEntries.length} 筆 issue · 工時日期：${state.batchSpentOn || "未設定"}`;
+  // 無 active preview 時用 client 驗證即時刷新各列 errors，讓驗證欄 / 欄位紅框 /
+  // 送出鈕狀態即時反映；preview 後（有 token）保留 server 回填的 errors 與 duplicate。
+  if (!state.previewToken) {
+    for (const entry of state.draftEntries) {
+      entry.errors = validateDraftEntryLive(entry);
+    }
+  }
   elements.tableWrap.innerHTML = `
     <table>
       <colgroup>
@@ -3632,8 +3669,21 @@ CommitModal.init({
       state.commitResults = [];
       state.previewWarnings = [error.message || String(error)];
       renderAll();
+      focusFirstInvalidField();
     }
   },
+});
+
+// Ctrl/Cmd + Enter：在「填寫工時」view 內快速觸發送出（沿用 commitButton →
+// CommitModal 流程，不另開新路徑）。送出鈕 disabled、overlay 收起或非 worklog
+// view 時都不作用（offsetParent 為 null 代表按鈕不可見，即 overlay 已關）。
+document.addEventListener("keydown", (event) => {
+  if (!(event.ctrlKey || event.metaKey) || event.key !== "Enter") return;
+  if (state.sideView !== "worklog") return;
+  if (!elements.commitButton || elements.commitButton.disabled) return;
+  if (elements.commitButton.offsetParent === null) return;
+  event.preventDefault();
+  elements.commitButton.click();
 });
 
 elements.batchSpentOn.addEventListener("change", (event) => {

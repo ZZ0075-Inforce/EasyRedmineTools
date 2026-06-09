@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202606092108
+// @version      1.0.202606092206
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -115,7 +115,7 @@ const APP_HTML = `<div class="pj-app-shell">
           <div class="pj-alert-stack" id="pj-alert-stack"></div>
           <div class="pj-table-wrap" id="pj-table-wrap"></div>
           <div class="pj-sticky-actions" id="pj-sticky-actions">
-            <span class="muted" id="sticky-summary">至少填入一筆工時後即可送出。</span>
+            <span class="muted" id="sticky-summary">至少填入一筆工時後即可送出（Ctrl/⌘ + Enter 快速送出）。</span>
             <button class="pj-action-button" id="commit-button">送出工時</button>
           </div>
         </aside>
@@ -846,16 +846,24 @@ const APP_CSS = `#__worklog_root {
         font-size: 14px;
         font-weight: 500;
         line-height: 1;
-        transition: background 150ms ease-out, border-color 150ms ease-out;
+        transition: background 150ms ease-out, border-color 150ms ease-out, box-shadow 150ms ease-out, transform 150ms ease-out;
         white-space: nowrap;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-      }#__worklog_root .pj-action-button { background: var(--accent); color: white; }#__worklog_root .pj-action-button:hover { background: var(--accent-hover); }#__worklog_root .pj-ghost-button {
+      }#__worklog_root .pj-action-button { background: var(--accent); color: white; }#__worklog_root .pj-action-button:hover:not(:disabled) {
+        background: var(--accent-hover);
+        box-shadow: var(--shadow-md);
+        transform: translateY(-1px);
+      }#__worklog_root .pj-action-button:active:not(:disabled) { transform: translateY(0); box-shadow: var(--shadow); }#__worklog_root .pj-ghost-button {
         background: transparent;
         color: var(--ink);
         border: 1px solid var(--panel-border);
-      }#__worklog_root .pj-ghost-button:hover { background: var(--subtle); }#__worklog_root .pj-danger-button { background: transparent; color: var(--danger); border: 1px solid var(--panel-border); }#__worklog_root .pj-danger-button:hover { background: var(--danger-soft); border-color: var(--danger); }#__worklog_root button:disabled {
+      }#__worklog_root .pj-ghost-button:hover:not(:disabled) {
+        background: var(--subtle);
+        box-shadow: var(--shadow);
+        transform: translateY(-1px);
+      }#__worklog_root .pj-ghost-button:active:not(:disabled) { transform: translateY(0); box-shadow: none; }#__worklog_root .pj-danger-button { background: transparent; color: var(--danger); border: 1px solid var(--panel-border); }#__worklog_root .pj-danger-button:hover { background: var(--danger-soft); border-color: var(--danger); }#__worklog_root button:disabled {
         opacity: 0.55;
         filter: grayscale(0.4);
         cursor: not-allowed;
@@ -1170,7 +1178,13 @@ const APP_CSS = `#__worklog_root {
       }#__worklog_root .pj-hours-stepper .pj-hours-input:focus { outline: none; border-color: transparent; }#__worklog_root .pj-hours-input::-webkit-outer-spin-button, #__worklog_root .pj-hours-input::-webkit-inner-spin-button {
         -webkit-appearance: none;
         margin: 0;
-      }#__worklog_root .pj-hours-input { -moz-appearance: textfield; appearance: textfield; }#__worklog_root .pj-row-errors { margin: 0; padding-left: 16px; color: var(--danger); font-size: 13px; line-height: 1.5; }#__worklog_root .pj-duplicate-chip {
+      }#__worklog_root .pj-hours-input { -moz-appearance: textfield; appearance: textfield; }#__worklog_root .pj-row-errors { margin: 0; padding-left: 16px; color: var(--danger); font-size: 13px; line-height: 1.5; }#__worklog_root .pj-field-invalid {
+        border-color: var(--danger) !important;
+        box-shadow: 0 0 0 2px var(--danger-soft) !important;
+      }#__worklog_root .pj-hours-stepper:has(.pj-hours-input.pj-field-invalid) {
+        border-color: var(--danger);
+        box-shadow: 0 0 0 2px var(--danger-soft);
+      }#__worklog_root .pj-duplicate-chip {
         display: inline-flex;
         margin-bottom: 6px;
         padding: 4px 10px;
@@ -1179,6 +1193,13 @@ const APP_CSS = `#__worklog_root {
         color: var(--warn-text);
         font-size: 12px;
         border: 1px solid var(--warn-border);
+      }#__worklog_root .pj-duplicate-chip-strong {
+        display: block;
+        background: var(--danger-soft);
+        color: var(--danger);
+        border-color: var(--danger);
+        font-weight: 600;
+        line-height: 1.5;
       }#__worklog_root .pj-duplicate-list, #__worklog_root .pj-result-list { margin: 0; padding-left: 16px; color: var(--muted); line-height: 1.55; }#__worklog_root .pj-mobile-label { display: none; }#__worklog_root .pj-draft-remove {
         border: 0;
         background: transparent;
@@ -1909,9 +1930,10 @@ const TimeEntryHandlers = {
           comments: t.comments || "",
         }));
         if (existing.length) {
+          // 偵測到同 issue 同日已有工時：標記 duplicate 並回傳既有明細，但「保留勾選」，
+          // 由使用者看警示後自行決定送出或移除（不再默默取消勾選造成「勾了卻沒送」的困惑）。
           e.duplicate = true;
           e.duplicate_entries = existing;
-          e.selected = false;
         }
       } catch (err) {
         warnings.push(`Issue #${e.issue_id} duplicate 查詢失敗：${err.message}`);
@@ -3155,6 +3177,10 @@ const LAUNCHER_CSS = `
   animation: __worklog_fade_in 150ms ease-out;
 }
 @keyframes __worklog_fade_in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes __worklog_pop_in {
+  from { opacity: 0; transform: scale(.97); }
+  to { opacity: 1; transform: scale(1); }
+}
 
 #${OVERLAY_ROOT_ID} {
   position: fixed !important;
@@ -3172,6 +3198,8 @@ const LAUNCHER_CSS = `
   border-radius: 14px;
   box-shadow: 0 12px 40px rgba(0,0,0,.3);
   overflow: hidden;  /* 外層不滾，內層 .shell 自己 scroll */
+  animation: __worklog_pop_in 180ms ease-out;  /* 進場 scale-in；showOverlay 會重播 */
+  transform-origin: center center;
 }
 #${OVERLAY_ROOT_ID} .pj-app-shell {
   height: 100% !important;
@@ -3288,6 +3316,20 @@ const LAUNCHER_CSS = `
 }
 #${CLOSE_BTN_ID}:hover { background: #fff; transform: scale(1.05); }
 
+/* Dark theme：build 把 data-theme 設在 #__worklog_root；close 鈕 / backdrop 是其
+   body 層 sibling，無法用後代選擇器，改用 :has() 從 body 偵測 overlay 的主題。 */
+body:has(#${OVERLAY_ROOT_ID}[data-theme="dark"]) #${CLOSE_BTN_ID} {
+  background: rgba(40,36,32,.92);
+  border-color: rgba(255,255,255,.14);
+  color: #f2ede7;
+}
+body:has(#${OVERLAY_ROOT_ID}[data-theme="dark"]) #${CLOSE_BTN_ID}:hover {
+  background: #2a2622;
+}
+body:has(#${OVERLAY_ROOT_ID}[data-theme="dark"]) #${BACKDROP_ID} {
+  background: rgba(0,0,0,.6);
+}
+
 @media (max-width: 600px) {
   #${OVERLAY_ROOT_ID} {
     top: 12px !important; left: 12px !important;
@@ -3367,11 +3409,22 @@ function mountOverlay() {
   __overlayMounted = true;
 }
 
+function replayAnim(el, anim) {
+  if (!el) return;
+  el.style.animation = "none";
+  // 強制 reflow，讓同一段 animation 能重新觸發（否則二次顯示不會重播）
+  void el.offsetWidth;
+  el.style.animation = anim;
+}
+
 function showOverlay() {
   if (!__overlayMounted) return;
   __overlayRoot.hidden = false;
   __backdrop.hidden = false;
   __closeBtn.hidden = false;
+  // mount 時注入的 CSS animation 不會在二次顯示自動重跑，手動重播進場動畫
+  replayAnim(__overlayRoot, "__worklog_pop_in 180ms ease-out");
+  replayAnim(__backdrop, "__worklog_fade_in 150ms ease-out");
 }
 
 function hideOverlay() {
@@ -3906,8 +3959,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202606092108";
-const APP_BUILD_TIME = "2026-06-09 21:08";
+const APP_VERSION = "1.0.202606092206";
+const APP_BUILD_TIME = "2026-06-09 22:06";
 
 const state = {
   localToday: localDateString(new Date()),
@@ -5527,6 +5580,25 @@ function sourceUsesMineApi(source) {
   return source.type === "mine" || source.type === "mine-grouped" || source.type === "schedule";
 }
 
+// Client 端即時驗證：與 time-entry-handlers.js 的 validateEntry 同 key（hours /
+// activity_id）同口徑，讓使用者在送出前就看到欄位錯誤，不必等 preview 回填。
+function validateDraftEntryLive(entry) {
+  const errors = {};
+  const hours = Number(entry.hours);
+  if (!entry.hours || !Number.isFinite(hours) || hours < 0.1) {
+    errors.hours = "請輸入有效時數（≥ 0.1）";
+  } else if (hours > 24) {
+    errors.hours = "時數不可超過 24 小時";
+  }
+  if (entry.activity_id === "" || entry.activity_id == null) {
+    errors.activity_id = "請選擇活動類型";
+  } else if (state.manualActivityEntry) {
+    const aid = Number(entry.activity_id);
+    if (!Number.isFinite(aid) || aid <= 0) errors.activity_id = "活動 ID 需為正整數";
+  }
+  return errors;
+}
+
 function clearEntryPreviewState(entry) {
   entry.errors = {};
   entry.duplicate = false;
@@ -6019,11 +6091,13 @@ function activityOptionsHtml(currentValue) {
 }
 
 function activityFieldHtml(entry) {
+  const invalidAttr = (entry.errors && entry.errors.activity_id)
+    ? ' class="pj-field-invalid" aria-invalid="true"' : "";
   if (state.manualActivityEntry) {
-    return `<input type="number" min="1" value="${escapeHtml(entry.activity_id || "")}" data-row-field="activity_id" data-issue-id="${entry.issue_id}" placeholder="activity_id">`;
+    return `<input type="number" min="1" value="${escapeHtml(entry.activity_id || "")}" data-row-field="activity_id" data-issue-id="${entry.issue_id}" placeholder="activity_id"${invalidAttr}>`;
   }
   return `
-    <select data-row-field="activity_id" data-issue-id="${entry.issue_id}">
+    <select data-row-field="activity_id" data-issue-id="${entry.issue_id}"${invalidAttr}>
       <option value="">選擇活動</option>
       ${activityOptionsHtml(entry.activity_id)}
     </select>
@@ -6074,7 +6148,7 @@ function renderRow(entry) {
           <span class="pj-mobile-label">時數</span>
           <div class="pj-hours-stepper">
             <button type="button" class="pj-stepper-btn" data-hours-step="-0.5" data-issue-id="${entry.issue_id}" aria-label="減 0.5 小時">−</button>
-            <input class="pj-hours-input" type="number" step="0.5" min="0" max="24" value="${escapeHtml(entry.hours || "")}" data-row-field="hours" data-issue-id="${entry.issue_id}" placeholder="1.5">
+            <input class="pj-hours-input${entry.errors && entry.errors.hours ? " pj-field-invalid" : ""}" type="number" step="0.5" min="0" max="24" value="${escapeHtml(entry.hours || "")}" data-row-field="hours" data-issue-id="${entry.issue_id}" placeholder="1.5"${entry.errors && entry.errors.hours ? ' aria-invalid="true"' : ""}>
             <button type="button" class="pj-stepper-btn" data-hours-step="0.5" data-issue-id="${entry.issue_id}" aria-label="加 0.5 小時">+</button>
           </div>
         </td>
@@ -6088,9 +6162,9 @@ function renderRow(entry) {
         </td>
         <td>
           <span class="pj-mobile-label">驗證</span>
-          ${entry.duplicate ? '<div class="pj-duplicate-chip">此 issue 同日期已有工時，已自動取消勾選</div>' : ""}
+          ${entry.duplicate ? `<div class="pj-duplicate-chip pj-duplicate-chip-strong">⚠️ 此 issue 在 ${escapeHtml(state.batchSpentOn || "該日")} 已有工時，確認非重複再送出；要排除請點左側 ×</div>` : ""}
           ${duplicateList ? `<ul class="pj-duplicate-list">${duplicateList}</ul>` : ""}
-          ${errors.length ? `<ul class="pj-row-errors">${errors.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : '<span class="muted">尚未送出或無錯誤</span>'}
+          ${errors.length ? `<ul class="pj-row-errors">${errors.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : '<span class="muted">✓ 已填妥</span>'}
         </td>
       </tr>
     </tbody>
@@ -6188,6 +6262,15 @@ function highlightFocusedRow() {
   }
 }
 
+// 驗證失敗後把焦點帶到第一個有錯誤的欄位（捲到畫面中央），省去使用者自己找紅字。
+// 無錯誤欄位（例如純網路錯誤）時為 no-op。
+function focusFirstInvalidField() {
+  const el = elements.tableWrap.querySelector('[aria-invalid="true"]');
+  if (!el) return;
+  el.scrollIntoView({ block: "center", behavior: "smooth" });
+  el.focus();
+}
+
 function selectedValidRows() {
   return state.draftEntries.filter((entry) => !Object.keys(entry.errors || {}).length);
 }
@@ -6282,6 +6365,13 @@ function renderTable() {
   }
 
   elements.workbenchSummary.textContent = `已選 ${state.draftEntries.length} 筆 issue · 工時日期：${state.batchSpentOn || "未設定"}`;
+  // 無 active preview 時用 client 驗證即時刷新各列 errors，讓驗證欄 / 欄位紅框 /
+  // 送出鈕狀態即時反映；preview 後（有 token）保留 server 回填的 errors 與 duplicate。
+  if (!state.previewToken) {
+    for (const entry of state.draftEntries) {
+      entry.errors = validateDraftEntryLive(entry);
+    }
+  }
   elements.tableWrap.innerHTML = `
     <table>
       <colgroup>
@@ -7528,8 +7618,21 @@ CommitModal.init({
       state.commitResults = [];
       state.previewWarnings = [error.message || String(error)];
       renderAll();
+      focusFirstInvalidField();
     }
   },
+});
+
+// Ctrl/Cmd + Enter：在「填寫工時」view 內快速觸發送出（沿用 commitButton →
+// CommitModal 流程，不另開新路徑）。送出鈕 disabled、overlay 收起或非 worklog
+// view 時都不作用（offsetParent 為 null 代表按鈕不可見，即 overlay 已關）。
+document.addEventListener("keydown", (event) => {
+  if (!(event.ctrlKey || event.metaKey) || event.key !== "Enter") return;
+  if (state.sideView !== "worklog") return;
+  if (!elements.commitButton || elements.commitButton.disabled) return;
+  if (elements.commitButton.offsetParent === null) return;
+  event.preventDefault();
+  elements.commitButton.click();
 });
 
 elements.batchSpentOn.addEventListener("change", (event) => {
