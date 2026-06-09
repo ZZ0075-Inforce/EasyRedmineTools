@@ -1233,6 +1233,9 @@
       .modal-quick-dates button:hover {
         background: var(--accent); color: #fff; border-color: var(--accent);
       }
+      .modal-quick-dates button.active {
+        background: var(--accent); color: #fff; border-color: var(--accent);
+      }
       .modal-date-warn {
         background: var(--warn-bg-strong); border: 1px solid var(--warn-border);
         border-radius: 6px; padding: 8px 10px;
@@ -1924,7 +1927,7 @@
             <div class="muted">已選 <span id="selected-count">0 筆</span></div>
           </div>
           <div class="list-toolbar">
-            <input id="filter-search" type="text" placeholder="🔍 搜尋標題..." class="filter-search-input">
+            <input id="filter-search" type="text" placeholder="🔍 搜尋標題 / 標籤 / #編號..." class="filter-search-input">
             <div class="toolbar-actions">
               <button class="ghost-button" id="select-all-button">全選</button>
               <button class="ghost-button" id="clear-selection-button">清空勾選</button>

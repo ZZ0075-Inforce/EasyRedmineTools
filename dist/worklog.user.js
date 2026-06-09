@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LawPJ Worklog Helper
 // @namespace    https://github.com/ZZ0075-Inforce/EasyRedmineTools
-// @version      1.0.202606021408
+// @version      1.0.202606092108
 // @description  Easy Redmine 工時批次補登工具（Tampermonkey 版，session 免 API Key）
 // @author       ZZ0075-Inforce
 // @match        https://lawpj.lawbroker.com.tw/*
@@ -73,7 +73,7 @@ const APP_HTML = `<div class="pj-app-shell">
             <div class="muted">已選 <span id="selected-count">0 筆</span></div>
           </div>
           <div class="pj-list-toolbar">
-            <input id="filter-search" type="text" placeholder="🔍 搜尋標題..." class="pj-filter-search-input">
+            <input id="filter-search" type="text" placeholder="🔍 搜尋標題 / 標籤 / #編號..." class="pj-filter-search-input">
             <div class="pj-toolbar-actions">
               <button class="pj-ghost-button" id="select-all-button">全選</button>
               <button class="pj-ghost-button" id="clear-selection-button">清空勾選</button>
@@ -1342,6 +1342,8 @@ const APP_CSS = `#__worklog_root {
         border: 1px solid var(--panel-border); border-radius: 6px;
         background: var(--subtle); color: var(--ink); cursor: pointer;
       }#__worklog_root .pj-modal-quick-dates button:hover {
+        background: var(--accent); color: #fff; border-color: var(--accent);
+      }#__worklog_root .pj-modal-quick-dates button.active {
         background: var(--accent); color: #fff; border-color: var(--accent);
       }#__worklog_root .pj-modal-date-warn {
         background: var(--warn-bg-strong); border: 1px solid var(--warn-border);
@@ -3904,8 +3906,8 @@ function __initWorklogApp() {
   if (__worklogAppInited) return;
   __worklogAppInited = true;
 const STORAGE_KEY = "lawpj.worklog.v1";
-const APP_VERSION = "1.0.202606021408";
-const APP_BUILD_TIME = "2026-06-02 14:08";
+const APP_VERSION = "1.0.202606092108";
+const APP_BUILD_TIME = "2026-06-09 21:08";
 
 const state = {
   localToday: localDateString(new Date()),
@@ -4730,6 +4732,14 @@ const CommitModal = (() => {
     elements.commitModal.setAttribute("aria-hidden", "true");
   }
 
+  function syncQuickDates() {
+    const current = elements.commitModalDate.value;
+    for (const btn of document.querySelectorAll("[data-modal-offset]")) {
+      const offset = Number(btn.dataset.modalOffset);
+      btn.classList.toggle("active", current === daysAgoString(offset));
+    }
+  }
+
   function updateDateWarn() {
     const selected = elements.commitModalDate.value;
     const today = daysAgoString(0);
@@ -4741,6 +4751,7 @@ const CommitModal = (() => {
     } else {
       elements.commitModalDateWarn.hidden = true;
     }
+    syncQuickDates();
   }
 
   function init({ onConfirm }) {
@@ -5728,12 +5739,25 @@ async function fetchIssues() {
 }
 
 function filteredIssues() {
-  const query = state.filterSearch.trim().toLowerCase();
+  let query = state.filterSearch.trim().toLowerCase();
   if (!query) return state.issues;
+  // 支援 #編號：去掉開頭的 # 再比對（#204178 等同 204178）
+  if (query.startsWith("#")) query = query.slice(1).trim();
+  if (!query) return state.issues; // 只打了一個 #
   return state.issues.filter((issue) => {
-    const title = (issue.subject || "").toLowerCase();
     const idStr = String(issue.issue_id);
-    return title.includes(query) || idStr.includes(query);
+    if (idStr.includes(query)) return true;
+    // 標題 + 卡片上現有標籤（狀態/專案/追蹤標籤/指派人）一起比對
+    const haystack = [
+      issue.subject,
+      issue.status,
+      issue.project,
+      issue.tracker,
+      issue.assigned_to,
+    ]
+      .map((v) => (v || "").toLowerCase())
+      .join(" ");
+    return haystack.includes(query);
   });
 }
 

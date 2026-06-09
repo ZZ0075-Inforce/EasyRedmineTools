@@ -825,6 +825,14 @@ const CommitModal = (() => {
     elements.commitModal.setAttribute("aria-hidden", "true");
   }
 
+  function syncQuickDates() {
+    const current = elements.commitModalDate.value;
+    for (const btn of document.querySelectorAll("[data-modal-offset]")) {
+      const offset = Number(btn.dataset.modalOffset);
+      btn.classList.toggle("active", current === daysAgoString(offset));
+    }
+  }
+
   function updateDateWarn() {
     const selected = elements.commitModalDate.value;
     const today = daysAgoString(0);
@@ -836,6 +844,7 @@ const CommitModal = (() => {
     } else {
       elements.commitModalDateWarn.hidden = true;
     }
+    syncQuickDates();
   }
 
   function init({ onConfirm }) {
@@ -1834,12 +1843,25 @@ async function fetchIssues() {
 }
 
 function filteredIssues() {
-  const query = state.filterSearch.trim().toLowerCase();
+  let query = state.filterSearch.trim().toLowerCase();
   if (!query) return state.issues;
+  // 支援 #編號：去掉開頭的 # 再比對（#204178 等同 204178）
+  if (query.startsWith("#")) query = query.slice(1).trim();
+  if (!query) return state.issues; // 只打了一個 #
   return state.issues.filter((issue) => {
-    const title = (issue.subject || "").toLowerCase();
     const idStr = String(issue.issue_id);
-    return title.includes(query) || idStr.includes(query);
+    if (idStr.includes(query)) return true;
+    // 標題 + 卡片上現有標籤（狀態/專案/追蹤標籤/指派人）一起比對
+    const haystack = [
+      issue.subject,
+      issue.status,
+      issue.project,
+      issue.tracker,
+      issue.assigned_to,
+    ]
+      .map((v) => (v || "").toLowerCase())
+      .join(" ");
+    return haystack.includes(query);
   });
 }
 
