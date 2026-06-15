@@ -4,3 +4,4 @@ config.local.json
 phrases.local.json
 saved_queries.local.json
 dist/dev-loader.user.js
+graphify-out/
